@@ -167,7 +167,7 @@ use frame_wipe::report::{self, Report};
 use frame_wipe::safety::SafetyFlags;
 use frame_wipe::units::{format_bytes, format_eta, format_throughput};
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub fn run() -> Result<(), String> {
@@ -552,7 +552,7 @@ static CANCEL_SLOT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 #[cfg(unix)]
 extern "C" fn on_sigint(_: i32) {
     if let Some(f) = CANCEL_SLOT.get() {
-        f.store(true, Ordering::SeqCst);
+        f.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
