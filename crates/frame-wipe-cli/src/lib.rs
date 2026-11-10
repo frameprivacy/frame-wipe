@@ -351,16 +351,15 @@ pub fn run_cli(cli: Cli) -> Result<(), String> {
             let cancel = install_cancel();
             let mut last: Option<Report> = None;
             for p in paths {
-                let flags = SafetyFlags {
+                let mut flags = SafetyFlags {
                     assume_yes: yes,
-                    typed_confirm: confirm
-                        .clone()
-                        .or_else(|| p.file_name().map(|n| n.to_string_lossy().into_owned())),
+                    typed_confirm: confirm.clone(),
                     explicit_target: true,
                     countdown_secs: countdown,
                     dry_run,
                     ..SafetyFlags::default()
                 };
+                confirm_if_needed(&p, &mut flags, yes)?;
                 let reports = wipe_tree(&p, method.clone(), chunk, flags, &cancel, |f| {
                     eprintln!("wiping {}", f.display());
                 })
@@ -468,7 +467,7 @@ fn confirm_if_needed(
         }
     }
     if flags.typed_confirm.is_none() {
-        if yes && snap.is_regular_file {
+        if yes && (snap.is_regular_file || snap.is_directory) {
             flags.typed_confirm = Some(snap.identity.display_name.clone());
             return Ok(());
         }

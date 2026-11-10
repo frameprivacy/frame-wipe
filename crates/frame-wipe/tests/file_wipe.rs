@@ -214,3 +214,34 @@ fn wipes_unicode_and_long_file_names() {
         assert!(data.iter().all(|b| *b == 0), "wipe did not zero {confirm}");
     }
 }
+
+#[test]
+fn refuses_to_wipe_a_file_without_confirmation() {
+    let _env = lock_env();
+    std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
+    let path = dir.path().join("secret.txt");
+    let original = b"do-not-wipe-me!!!!";
+    fs::write(&path, original).unwrap();
+    let flags = SafetyFlags {
+        explicit_target: true,
+        countdown_secs: 0,
+        ..SafetyFlags::default()
+    };
+    let err = wipe_tree(
+        &path,
+        Method::zeros(),
+        None,
+        flags,
+        &Arc::new(AtomicBool::new(false)),
+        |_| {},
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.guard(),
+        Some(Guard::ConfirmationMissing),
+        "files must not be wiped without --yes or --confirm, got {err}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), original);
+}

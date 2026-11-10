@@ -45,6 +45,11 @@ pub fn wipe_tree(
     if !meta.is_dir() {
         return Err(Error::InvalidTarget(root.to_path_buf()));
     }
+    if !flags.assume_yes && flags.typed_confirm.is_none() {
+        return Err(crate::safety::confirmation_required_error(
+            &crate::device::inspect(root)?.identity,
+        ));
+    }
     let start_dev = file_dev(root, &meta);
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -87,12 +92,13 @@ pub fn wipe_tree(
             }
             on_file(&path);
             let mut file_flags = flags.clone();
-            file_flags.typed_confirm = flags
-                .typed_confirm
-                .clone()
-                .or_else(|| Some(crate::device::file_display_name(&path)));
             file_flags.explicit_target = true;
-            file_flags.assume_yes = true;
+            // After the operator confirmed the tree root, child files may
+            // proceed with --yes and their own file name as confirmation.
+            if flags.assume_yes || flags.typed_confirm.is_some() {
+                file_flags.typed_confirm = Some(crate::device::file_display_name(&path));
+                file_flags.assume_yes = true;
+            }
             reports.push(wipe_one_file(
                 &path,
                 method.clone(),
@@ -113,10 +119,9 @@ fn wipe_one_file(
     cancel: &Arc<AtomicBool>,
 ) -> Result<Report, Error> {
     flags.explicit_target = true;
-    if flags.typed_confirm.is_none() {
+    if flags.typed_confirm.is_none() && flags.assume_yes {
         flags.typed_confirm = Some(crate::device::file_display_name(path));
     }
-    flags.assume_yes = true;
     // Directory walks already confirmed at the root; individual files use a 0s countdown
     // only because they are regular files (planner allows this for virtual_or_image).
     let req = WipeRequest {
