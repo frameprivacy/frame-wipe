@@ -26,7 +26,8 @@ fn main() -> eframe::Result<()> {
     let args = Args::parse();
     let scale = args.scale;
     let size = [args.width, args.height];
-    let options = eframe::NativeOptions {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(size)
             .with_min_inner_size([1024.0, 700.0])
@@ -35,6 +36,11 @@ fn main() -> eframe::Result<()> {
             .with_maximized(false),
         ..Default::default()
     };
+    #[cfg(windows)]
+    {
+        // Prefer DirectX / WARP; glow requires OpenGL 2.0, which Windows CI lacks.
+        options.renderer = eframe::Renderer::Wgpu;
+    }
     eframe::run_native(
         "Frame Wipe",
         options,

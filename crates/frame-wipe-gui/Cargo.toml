@@ -21,8 +21,14 @@ frame-wipe = { workspace = true }
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11"] }
 egui = "0.31"
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.31"
+
+# Windows hosted CI has no OpenGL 2.0 context. wgpu uses DirectX (including WARP)
+# so --smoke-test can launch a real window there.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["glow", "wgpu", "default_fonts"] }
 egui = "0.31"
 
 
