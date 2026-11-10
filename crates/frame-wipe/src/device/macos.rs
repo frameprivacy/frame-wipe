@@ -69,8 +69,7 @@ pub fn path_is_on_system_disk(path: &Path) -> bool {
     }
     // If diskutil is missing, fails, or its plist cannot be parsed, still
     // protect the boot volume and the APFS data volume.
-    let roots: Vec<&Path> = ["/".as_ref(), "/System/Volumes/Data".as_ref()];
-    super::same_unix_device(path, &roots)
+    super::same_unix_device(path, &[Path::new("/"), Path::new("/System/Volumes/Data")])
 }
 
 pub fn path_is_on_app_disk(path: &Path) -> bool {
