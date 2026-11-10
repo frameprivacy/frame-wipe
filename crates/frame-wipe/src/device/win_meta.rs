@@ -6,7 +6,8 @@ use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
 
 /// Volume serial and file index via GetFileInformationByHandle (stable).
@@ -21,9 +22,12 @@ pub fn volume_serial(path: &Path) -> Option<u64> {
 }
 
 fn by_handle_info(path: &Path) -> Option<BY_HANDLE_FILE_INFORMATION> {
+    // Directories need FILE_FLAG_BACKUP_SEMANTICS to open a handle.
+    // The flag is also valid for files, so use it for both.
     let file = OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)
         .ok()?;
     unsafe {

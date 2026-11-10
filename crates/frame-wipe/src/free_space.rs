@@ -303,11 +303,16 @@ mod tests {
         let first = fill_dir.join("fill-000000");
         let start = Instant::now();
         while !first.exists() {
+            if handle.is_finished() {
+                let result = handle.join().expect("wipe thread panicked");
+                TEST_FILE_CAP.store(0, Ordering::SeqCst);
+                panic!("wipe ended before creating a filler file: {result:?}");
+            }
             if start.elapsed() > Duration::from_secs(15) {
                 cancel.store(true, Ordering::SeqCst);
-                let _ = handle.join();
+                let result = handle.join();
                 TEST_FILE_CAP.store(0, Ordering::SeqCst);
-                panic!("filler file was never created");
+                panic!("filler file was never created; wipe thread result: {result:?}");
             }
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -327,6 +332,20 @@ mod tests {
             !fill_dir.exists(),
             "filler directory left behind at {}",
             fill_dir.display()
+        );
+    }
+
+    #[test]
+    fn directory_targets_are_identified() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
+        let snap = crate::device::inspect(dir.path()).unwrap();
+        assert!(snap.is_directory);
+        assert!(
+            snap.identity.is_identified(),
+            "a directory needs a file id so free-space mode can be planned"
         );
     }
 }
