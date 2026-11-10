@@ -57,6 +57,10 @@ impl Journal {
 const MAX_FILE_NAME_BYTES: usize = 255;
 
 pub fn journal_path_for(target: &Path) -> PathBuf {
+    if parent_is_device_namespace(target) {
+        let digest = fnv1a64(target.to_string_lossy().as_bytes());
+        return journal_cache_dir().join(format!(".frame-wipe-{digest:016x}.journal"));
+    }
     let file_name = target
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -72,6 +76,47 @@ pub fn journal_path_for(target: &Path) -> PathBuf {
     let digest = fnv1a64(target.to_string_lossy().as_bytes());
     p.set_file_name(format!(".frame-wipe-{digest:016x}.journal"));
     p
+}
+
+fn parent_is_device_namespace(target: &Path) -> bool {
+    let s = target.to_string_lossy();
+    let lower = s.replace('\\', "/").to_ascii_lowercase();
+    if lower == "/dev" || lower.starts_with("/dev/") {
+        return true;
+    }
+    crate::safety::path_looks_like_raw_device(target)
+        || crate::safety::windows_path_looks_like_raw_device(&s)
+}
+
+fn journal_cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("FRAME_WIPE_JOURNAL_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return PathBuf::from(xdg).join("frame-wipe");
+        }
+    }
+    if cfg!(windows) {
+        if let Ok(base) = std::env::var("LOCALAPPDATA") {
+            if !base.is_empty() {
+                return PathBuf::from(base).join("frame-wipe");
+            }
+        }
+    }
+    if cfg!(target_os = "macos") {
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                return PathBuf::from(home).join("Library/Caches/frame-wipe");
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return PathBuf::from(home).join(".cache/frame-wipe");
+        }
+    }
+    std::env::temp_dir().join("frame-wipe")
 }
 
 fn fnv1a64(data: &[u8]) -> u64 {
@@ -109,6 +154,14 @@ pub fn read(path: &Path) -> Result<Option<Journal>, Error> {
 /// Write a checkpoint. The contents are written to a sibling temp file, flushed,
 /// and then renamed over the journal path (atomic on the same volume on Unix).
 pub fn checkpoint(path: &Path, journal: &Journal) -> Result<(), Error> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            Error::Journal(format!(
+                "create journal directory {}: {e}",
+                parent.display()
+            ))
+        })?;
+    }
     let tmp = path.with_extension("journal.tmp");
     let data = serde_json::to_vec_pretty(journal)
         .map_err(|e| Error::Journal(format!("serialize: {e}")))?;
@@ -202,5 +255,35 @@ mod tests {
         );
         assert_eq!(journal_path_for(&target), journal);
         assert!(name.starts_with(".frame-wipe-") && name.ends_with(".journal"));
+    }
+
+    #[test]
+    fn raw_device_journals_are_not_written_under_dev() {
+        fn looks_like_device_namespace(path: &Path) -> bool {
+            let lower = path
+                .to_string_lossy()
+                .replace("\\", "/")
+                .to_ascii_lowercase();
+            lower.contains("/dev/")
+                || lower.contains("//./")
+                || lower.contains("//?/")
+                || lower.starts_with("//.")
+        }
+
+        for target in [
+            Path::new("/dev/sdb"),
+            Path::new("/dev/nvme0n1"),
+            Path::new("/dev/disk2"),
+            Path::new("/dev/loop0"),
+            Path::new(r"\\.\PhysicalDrive1"),
+        ] {
+            let journal = journal_path_for(target);
+            assert!(
+                !looks_like_device_namespace(&journal),
+                "journal for {} must not live in a device namespace: {}",
+                target.display(),
+                journal.display()
+            );
+        }
     }
 }

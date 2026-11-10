@@ -44,7 +44,7 @@ Default is 5 seconds, cancellable (CLI: Ctrl-C; GUI: Cancel). The countdown runs
 - Short writes are retried once, then reported with the offset and the number of bytes actually written, and the run stops.
 - Media errors (bad sectors) abort the run and report the offset, unless `--skip-bad-sectors` is set. In that case the range is recorded in the report and may still hold leftover data.
 - Cancel finishes the current chunk, `fsync`s, writes a journal checkpoint, and returns a cancelled report.
-- A journal file (`.name.frame-wipe-journal` next to the target) is flushed and `fsync`d as work proceeds, so a power loss can be detected on the next run. `--resume` continues only if the identity still matches.
+- A journal file is flushed and `fsync`d as work proceeds, so a power loss can be detected on the next run. For a regular image file the journal is a sidecar (`.name.frame-wipe-journal`) next to the target. For a raw device it is stored under the application cache directory (`$XDG_CACHE_HOME/frame-wipe`, `~/Library/Caches/frame-wipe`, or `%LOCALAPPDATA%\frame-wipe`), because `/dev` and `\\.\` are not durable places for a sidecar. `--resume` continues only if the identity still matches.
 
 ## Verify
 
