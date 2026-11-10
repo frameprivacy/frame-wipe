@@ -21,8 +21,8 @@ Unless an explicit flag is passed, the planner refuses:
 | `Symlink` / `FollowedLink` | The path is a symlink. File wipes never follow symlinks (`O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`, plus `lstat`). | Do not pass a symlink |
 | `RestrictedTestTarget` | Tests and CI (`FRAME_WIPE_FORBID_REAL_DISKS=1`) may only write regular files or virtual devices whose backing file is under the test directory. | Not a user flag |
 | `IdentityMismatch` | Serial, size, path, or file id changed after the plan, or a mount/holder appeared. | Start again after checking the device |
-| `CountdownCancelled` | The operator cancelled during the pre-write countdown. No write is issued. | — |
-| `FirmwareNotSupported` | Firmware sanitize is not available on this target, or this version will not send the command. | Use overwrite, or a vendor / nvme-cli tool |
+| `CountdownCancelled` | The operator cancelled during the pre-write countdown. No write is issued. | - |
+| `FirmwareNotSupported` | Firmware sanitize is not available on this target, the platform cannot issue it, or `FRAME_WIPE_FORBID_REAL_DISKS` is set. | Use overwrite, or a vendor tool |
 
 A zero-second countdown is allowed only for disk images and verified virtual devices, not for physical disks.
 
@@ -52,7 +52,11 @@ Single-pass methods verify by default. For a random pass, the same CSPRNG seed u
 
 ## Firmware commands
 
-This version does not issue NVMe Sanitize, NVMe Format, or ATA Secure Erase. It can report when a device looks like NVMe. A wrong firmware command can make a drive unusable; use the vendor tool or `nvme-cli` if you need that, and read the manual.
+On Linux, `framewipe sanitize` can issue NVMe Sanitize (crypto or block erase), NVMe Format NVM, or ATA SECURITY ERASE UNIT after the same planner checks as a wipe, including a typed confirmation of the device name. The tool first reads Identify data and refuses a frozen ATA security lock, a drive that already has a password, or a controller that does not report support.
+
+Firmware commands are never sent when `FRAME_WIPE_FORBID_REAL_DISKS=1` (the default in tests and CI). macOS and Windows report capability only in this version and do not send a firmware command.
+
+A wrong or interrupted firmware command can make a drive unusable or leave it locked. This tool is not NIST certified. Read the drive manual before using this path.
 
 ## Tests
 

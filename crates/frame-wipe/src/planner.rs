@@ -37,6 +37,21 @@ impl MediaKind {
     pub fn is_virtual(self) -> bool {
         matches!(self, Self::Loop | Self::Image | Self::Virtual | Self::Ram)
     }
+
+    /// Short label for the UI (HDD, SSD, NVMe, ...).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hdd => "HDD",
+            Self::Ssd => "SSD",
+            Self::Nvme => "NVMe",
+            Self::Optical => "Optical",
+            Self::Ram => "RAM",
+            Self::Loop => "Loop",
+            Self::Image => "Image",
+            Self::Virtual => "Virtual",
+            Self::Unknown => "Unknown",
+        }
+    }
 }
 
 /// A point-in-time view of a target, used by the planner and re-checked later.

@@ -103,6 +103,96 @@ pub fn t(lang: Lang, key: &str) -> &'static str {
         (Lang::Fr, "ui.failed") => "Echec",
         (Lang::En, "ui.badge.ssd") => "SSD",
         (Lang::Fr, "ui.badge.ssd") => "SSD",
+        (Lang::En, "ui.available") => "Available",
+        (Lang::Fr, "ui.available") => "Disponible",
+        (Lang::En, "ui.protected") => "Protected",
+        (Lang::Fr, "ui.protected") => "Protege",
+        (Lang::En, "ui.drives_summary") => "Drives on this computer",
+        (Lang::Fr, "ui.drives_summary") => "Disques de cet ordinateur",
+        (Lang::En, "ui.tips") => "Before you start",
+        (Lang::Fr, "ui.tips") => "Avant de commencer",
+        (Lang::En, "ui.tip1") => "Unmount the volume if you want to overwrite the whole device.",
+        (Lang::Fr, "ui.tip1") => {
+            "Demontez le volume si vous voulez ecraser le peripherique entier."
+        }
+        (Lang::En, "ui.tip2") => {
+            "You will have to type the device name, then wait through a short countdown."
+        }
+        (Lang::Fr, "ui.tip2") => {
+            "Vous devrez saisir le nom du peripherique, puis attendre un court compte a rebours."
+        }
+        (Lang::En, "ui.tip3") => {
+            "An overwrite on an SSD cannot reach every remapped block. Read SAFETY.md."
+        }
+        (Lang::Fr, "ui.tip3") => {
+            "Un ecrasement sur un SSD n'atteint pas tous les blocs remappes. Lisez SAFETY.md."
+        }
+        (Lang::En, "ui.overwrite") => "Overwrite…",
+        (Lang::Fr, "ui.overwrite") => "Ecraser…",
+        (Lang::En, "ui.estimate") => "Rough time estimate",
+        (Lang::Fr, "ui.estimate") => "Estimation du temps",
+        (Lang::En, "ui.estimate_note") => {
+            "Assumes about 500 MiB/s. Actual time depends on the drive and the method."
+        }
+        (Lang::Fr, "ui.estimate_note") => {
+            "Base sur environ 500 Mio/s. Le temps reel depend du disque et de la methode."
+        }
+        (Lang::En, "ui.serial") => "Serial",
+        (Lang::Fr, "ui.serial") => "Numero de serie",
+        (Lang::En, "ui.size") => "Size",
+        (Lang::Fr, "ui.size") => "Taille",
+        (Lang::En, "ui.path") => "Path",
+        (Lang::Fr, "ui.path") => "Chemin",
+        (Lang::En, "ui.type") => "Type",
+        (Lang::Fr, "ui.type") => "Type",
+        (Lang::En, "ui.none_available") => {
+            "No overwritable drives. Protected disks are listed on the left, dimmed."
+        }
+        (Lang::Fr, "ui.none_available") => {
+            "Aucun disque ecrasable. Les disques proteges sont listes a gauche, estompes."
+        }
+        (Lang::En, "ui.empty") => {
+            "No drives were found. You may need to run this program as administrator."
+        }
+        (Lang::Fr, "ui.empty") => {
+            "Aucun disque trouve. Il faudra peut-etre lancer ce programme en administrateur."
+        }
+        (Lang::En, "ui.protected_reason_system") => {
+            "System disk. Refused unless you override this in the command-line tool."
+        }
+        (Lang::Fr, "ui.protected_reason_system") => {
+            "Disque systeme. Refuse, sauf exception dans l'outil en ligne de commande."
+        }
+        (Lang::En, "ui.protected_reason_app") => "This is the disk Frame Wipe is running from.",
+        (Lang::Fr, "ui.protected_reason_app") => "C'est le disque depuis lequel Frame Wipe tourne.",
+        (Lang::En, "ui.protected_reason_raid") => {
+            "RAID or LVM member. Wiping one leg of an array is easy to get wrong."
+        }
+        (Lang::Fr, "ui.protected_reason_raid") => {
+            "Membre RAID ou LVM. Ecraser un seul element d'un ensemble est risque."
+        }
+        (Lang::En, "ui.unknown_model") => "Unknown model",
+        (Lang::Fr, "ui.unknown_model") => "Modele inconnu",
+        (Lang::En, "ui.no_serial") => "No serial",
+        (Lang::Fr, "ui.no_serial") => "Pas de numero de serie",
+        (Lang::En, "ui.report_title") => "Completed",
+        (Lang::Fr, "ui.report_title") => "Termine",
+        (Lang::En, "ui.back") => "Back to drives",
+        (Lang::Fr, "ui.back") => "Retour aux disques",
+        (Lang::En, "ui.mounted_hint") => {
+            "This volume is mounted. Choose free space only, or unmount it first."
+        }
+        (Lang::Fr, "ui.mounted_hint") => {
+            "Ce volume est monte. Choisissez l'espace libre, ou demontez-le d'abord."
+        }
+        (Lang::En, "ui.can_overwrite") => "can be overwritten",
+        (Lang::Fr, "ui.can_overwrite") => "peuvent etre ecrases",
+        (Lang::En, "ui.protected_count") => "protected",
+        (Lang::Fr, "ui.protected_count") => "proteges",
+        (Lang::En, "ui.working") => "Overwriting",
+        (Lang::Fr, "ui.working") => "Ecrasement en cours",
+        (Lang::En, "ui.confirm_name") => "Device name",
+        (Lang::Fr, "ui.confirm_name") => "Nom du peripherique",
         _ => "??",
     }
 }

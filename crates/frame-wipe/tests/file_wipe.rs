@@ -6,11 +6,18 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[cfg(unix)]
 #[test]
 fn refuses_symlink() {
+    let _env = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
@@ -40,6 +47,7 @@ fn refuses_symlink() {
 
 #[test]
 fn wipes_regular_file() {
+    let _env = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
@@ -70,6 +78,7 @@ fn wipes_regular_file() {
 #[cfg(windows)]
 #[test]
 fn refuses_symlink_windows() {
+    let _env = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());

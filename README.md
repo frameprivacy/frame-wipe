@@ -72,9 +72,9 @@ A 5-second cancellable countdown runs before the first write. Ctrl-C cancels aft
 
 `framewipe-gui --smoke-test` opens the window, draws a few frames, and exits. Used by CI.
 
-The GUI is a native Rust interface (egui + eframe, glow renderer). It is not Electron or a system webview. A Linux x64 release build of this tree (LTO, stripped) is about 1.0 MiB for `framewipe` and about 4.6 MiB for `framewipe-gui`. CI artifacts have the sizes for the other OS and architecture combinations.
+The GUI is a native Rust interface (egui + eframe, glow renderer). It is not Electron or a system webview. A Linux x64 release build of this tree (LTO, stripped) is about 1.07 MiB for `framewipe` and about 4.84 MiB for `framewipe-gui`. CI artifacts have the sizes for the other OS and architecture combinations.
 
-On one Linux VM, overwriting a 512 MiB image file: `dd if=/dev/zero bs=8M conv=fsync` was about 657 MiB/s; `framewipe --method zeros --no-verify --chunk-size 8M` was about 566-711 MiB/s. That is a single machine, not a claim about every disk.
+On one Linux VM, overwriting a 512 MiB image file: `dd if=/dev/zero bs=8M conv=fsync` was about 583 MiB/s; `framewipe --method zeros --no-verify --chunk-size 8M` was about 940 MiB/s. That is a single machine, not a claim about every disk.
 
 ## Safety tests
 

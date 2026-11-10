@@ -10,14 +10,21 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-fn setup() -> (tempfile::TempDir, PathBuf) {
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn setup() -> (MutexGuard<'static, ()>, tempfile::TempDir, PathBuf) {
+    let guard = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().to_path_buf();
     std::env::set_var("FRAME_WIPE_TEST_DIR", &path);
-    (dir, path)
+    (guard, dir, path)
 }
 
 fn make_image(dir: &Path, name: &str, size: usize, fill: u8) -> PathBuf {
@@ -40,7 +47,7 @@ fn flags_for(path: &Path) -> SafetyFlags {
 
 #[test]
 fn zeros_with_default_verify() {
-    let (tmp, dir) = setup();
+    let (_env, tmp, dir) = setup();
     let path = make_image(&dir, "z.img", 2 * 1024 * 1024, 0xA5);
     let cancel = Arc::new(AtomicBool::new(false));
     let req = WipeRequest {
@@ -60,7 +67,7 @@ fn zeros_with_default_verify() {
 
 #[test]
 fn random_with_verify() {
-    let (tmp, dir) = setup();
+    let (_env, tmp, dir) = setup();
     let path = make_image(&dir, "r.img", 1024 * 1024, 0x11);
     let cancel = Arc::new(AtomicBool::new(false));
     let req = WipeRequest {
@@ -79,7 +86,7 @@ fn random_with_verify() {
 
 #[test]
 fn dry_run_does_not_write() {
-    let (tmp, dir) = setup();
+    let (_env, tmp, dir) = setup();
     let path = make_image(&dir, "d.img", 64 * 1024, 0xAB);
     let mut flags = flags_for(&path);
     flags.dry_run = true;
@@ -99,7 +106,7 @@ fn dry_run_does_not_write() {
 
 #[test]
 fn identity_mismatch_aborts_before_write() {
-    let (tmp, dir) = setup();
+    let (_env, tmp, dir) = setup();
     let path = make_image(&dir, "hot.img", 512 * 1024, 0xCD);
     // After plan+countdown, truncate the file so size changes.
     // The hook must use a process-wide leak of the path.
@@ -143,7 +150,7 @@ fn identity_mismatch_aborts_before_write() {
 
 #[test]
 fn recapture_detects_size_change() {
-    let (tmp, dir) = setup();
+    let (_env, tmp, dir) = setup();
     let path = make_image(&dir, "id.img", 128 * 1024, 0x01);
     let first = device::inspect(&path).unwrap().identity;
     {
@@ -172,6 +179,7 @@ fn cancel_during_countdown() {
 
 #[test]
 fn restricted_mode_refuses_raw_device_path() {
+    let _env = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let flags = SafetyFlags {
         explicit_target: true,
@@ -207,6 +215,7 @@ fn enumerate_does_not_panic() {
 
 #[test]
 fn system_disk_is_detected_and_not_wiped() {
+    let _env = lock_env();
     std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
     let list = device::enumerate(device::EnumerateOptions {
         include_virtual: true,

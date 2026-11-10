@@ -124,7 +124,7 @@ pub enum Command {
         #[arg(long)]
         report: Option<PathBuf>,
     },
-    /// Report firmware sanitize support. This version does not send a sanitize command.
+    /// Report firmware sanitize support, or issue a Linux NVMe Sanitize / Format or ATA Secure Erase after the same safety checks and typed confirmation as a wipe.
     Sanitize {
         target: PathBuf,
         #[arg(long)]

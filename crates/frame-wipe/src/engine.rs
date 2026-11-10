@@ -341,6 +341,21 @@ fn io_path_for(user: &Path, snap: &TargetSnapshot) -> PathBuf {
     device::raw_path_for(&snap.identity.path)
 }
 
+fn chunk_len(direct: bool, align: usize, chunk: usize, offset: u64, size: u64) -> usize {
+    let remaining = size - offset;
+    let want = remaining.min(chunk as u64) as usize;
+    if direct {
+        let a = (want / align) * align;
+        if a == 0 {
+            want
+        } else {
+            a
+        }
+    } else {
+        want
+    }
+}
+
 fn write_pass(
     io: &mut RawIo,
     plan: &Plan,
@@ -355,100 +370,24 @@ fn write_pass(
     bad: &mut Vec<SectorError>,
 ) -> Result<u64, Error> {
     let size = plan.size;
-    let chunk = plan.chunk_size as usize;
-    let align = io.alignment.max(512);
-    let mut rng = seed.map(ChaCha20Rng::from_seed);
-
-    let mut offset: u64 = 0;
-    let mut written: u64 = 0;
-    let mut meter = Meter::new();
-    let mut since_journal: u64 = 0;
-
-    while offset < size {
-        if cancel.load(Ordering::SeqCst) {
-            return Err(Error::Cancelled);
-        }
-        let remaining = size - offset;
-        let want = remaining.min(chunk as u64) as usize;
-        // For direct I/O, only issue aligned full-block writes; handle a tail separately.
-        let aligned_len = if io.direct {
-            let a = (want / align) * align;
-            if a == 0 {
-                want
-            } else {
-                a
-            }
-        } else {
-            want
-        };
-
-        let mut buf = alloc_aligned(aligned_len.max(align), align)?;
-        fill_pattern(&mut buf.as_mut()[..aligned_len], pass.pattern, rng.as_mut());
-
-        match write_exact_or_report(
-            io,
-            offset,
-            &buf.as_ref()[..aligned_len],
-            plan.skip_bad_sectors,
-            bad,
-        ) {
-            Ok(n) => {
-                written += n as u64;
-                offset += n as u64;
-                since_journal += n as u64;
-            }
-            Err(Error::Cancelled) => return Err(Error::Cancelled),
-            Err(e) => return Err(e),
-        }
-
-        let (bps, eta) = meter.snapshot(offset, size);
-        emit_pass(
-            on_progress,
-            Phase::Writing,
-            pass_no,
-            total_passes,
-            plan,
-            offset,
-            bps,
-            eta,
-            None,
-        );
-
-        if since_journal >= plan.chunk_size || offset >= size {
-            journal.offset = offset;
-            journal.phase = "writing".into();
-            journal::checkpoint(journal_path, journal)?;
-            since_journal = 0;
-        }
+    if size == 0 {
+        return Ok(0);
     }
-    let _ = chunk;
-    Ok(written)
-}
-
-/// Double-buffered helper used when the chunk is large enough to justify a fill thread.
-/// Currently the main loop fills then writes; this function keeps a fill thread primed
-/// for the next chunk while the current one is written. Exposed for the fast path.
-#[allow(dead_code, unused_assignments, unused_variables, unused_mut)]
-pub fn write_pass_double_buffered(
-    io: &mut RawIo,
-    plan: &Plan,
-    pass: Pass,
-    cancel: &Arc<AtomicBool>,
-    bad: &mut Vec<SectorError>,
-) -> Result<u64, Error> {
-    let size = plan.size;
     let chunk = plan.chunk_size as usize;
     let align = io.alignment.max(512);
-    let seed = seed_for_pass(pass.pattern, 1);
-    let mut rng_seed = seed;
+    let direct = io.direct;
+    let pattern = pass.pattern;
 
-    let (job_tx, job_rx) = sync_channel::<Option<(u64, usize, Option<[u8; 32]>)>>(2);
+    // Fill thread owns the CSPRNG and produces buffers in offset order so verify
+    // can replay the same stream from the same seed.
+    let (job_tx, job_rx) = sync_channel::<Option<(u64, usize)>>(2);
     let (buf_tx, buf_rx) = sync_channel::<Result<(u64, open::AlignedBuf, usize), Error>>(2);
 
     let fill = thread::Builder::new()
         .name("framewipe-fill".into())
         .spawn(move || {
-            while let Ok(Some((off, len, seed))) = job_rx.recv() {
+            let mut rng = seed.map(ChaCha20Rng::from_seed);
+            while let Ok(Some((off, len))) = job_rx.recv() {
                 let mut buf = match alloc_aligned(len.max(align), align) {
                     Ok(b) => b,
                     Err(e) => {
@@ -456,8 +395,7 @@ pub fn write_pass_double_buffered(
                         return;
                     }
                 };
-                let mut rng = seed.map(ChaCha20Rng::from_seed);
-                fill_pattern(&mut buf.as_mut()[..len], pass.pattern, rng.as_mut());
+                fill_pattern(&mut buf.as_mut()[..len], pattern, rng.as_mut());
                 if buf_tx.send(Ok((off, buf, len))).is_err() {
                     return;
                 }
@@ -465,42 +403,49 @@ pub fn write_pass_double_buffered(
         })
         .map_err(|e| Error::Message(format!("failed to start fill thread: {e}")))?;
 
-    let mut offset = 0u64;
-    let mut written = 0u64;
-    let mut in_flight = 0u32;
-    let mut start_fill =
-        |offset: u64,
-         job_tx: &std::sync::mpsc::SyncSender<Option<(u64, usize, Option<[u8; 32]>)>>|
-         -> Result<(), Error> {
-            if offset >= size {
-                return Ok(());
-            }
-            let remaining = size - offset;
-            let want = remaining.min(chunk as u64) as usize;
-            job_tx
-                .send(Some((offset, want, rng_seed)))
-                .map_err(|_| Error::Message("fill thread closed".into()))?;
-            Ok(())
-        };
+    let shutdown = |job_tx: &std::sync::mpsc::SyncSender<Option<(u64, usize)>>,
+                    fill: std::thread::JoinHandle<()>| {
+        let _ = job_tx.send(None);
+        let _ = fill.join();
+    };
 
-    start_fill(0, &job_tx)?;
-    in_flight += 1;
-    if (chunk as u64) < size {
-        start_fill(chunk as u64, &job_tx)?;
-        in_flight += 1;
+    let mut next_to_queue: u64 = 0;
+    let mut in_flight: u32 = 0;
+    let mut written: u64 = 0;
+    let mut meter = Meter::new();
+    let mut since_journal: u64 = 0;
+
+    let queue_one = |next_to_queue: &mut u64, in_flight: &mut u32| -> Result<(), Error> {
+        if *next_to_queue >= size {
+            return Ok(());
+        }
+        let len = chunk_len(direct, align, chunk, *next_to_queue, size);
+        if len == 0 {
+            *next_to_queue = size;
+            return Ok(());
+        }
+        job_tx
+            .send(Some((*next_to_queue, len)))
+            .map_err(|_| Error::Message("fill thread closed".into()))?;
+        *next_to_queue += len as u64;
+        *in_flight += 1;
+        Ok(())
+    };
+
+    queue_one(&mut next_to_queue, &mut in_flight)?;
+    if next_to_queue < size {
+        queue_one(&mut next_to_queue, &mut in_flight)?;
     }
 
     while in_flight > 0 {
         if cancel.load(Ordering::SeqCst) {
-            let _ = job_tx.send(None);
-            let _ = fill.join();
+            shutdown(&job_tx, fill);
             return Err(Error::Cancelled);
         }
         let (off, buf, len) = match buf_rx.recv() {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
-                let _ = job_tx.send(None);
-                let _ = fill.join();
+                shutdown(&job_tx, fill);
                 return Err(e);
             }
             Err(_) => {
@@ -509,28 +454,42 @@ pub fn write_pass_double_buffered(
             }
         };
         in_flight -= 1;
-        match write_exact_or_report(io, off, &buf.as_ref()[..len], plan.skip_bad_sectors, bad) {
-            Ok(n) => {
-                written += n as u64;
-                offset = off + n as u64;
-            }
-            Err(e) => {
-                let _ = job_tx.send(None);
-                let _ = fill.join();
+        if next_to_queue < size {
+            if let Err(e) = queue_one(&mut next_to_queue, &mut in_flight) {
+                shutdown(&job_tx, fill);
                 return Err(e);
             }
         }
-        let next = off + len as u64;
-        // If we already queued the next start, queue the one after the later in-flight chunk.
-        if next < size && in_flight < 2 {
-            // The other in-flight chunk, if any, is ahead; queue the chunk after the last requested.
-            // Simpler: queue `offset` after the write we just finished if nothing is covering it.
-            if next + (in_flight as u64) * chunk as u64 <= size || next < size {
-                let queued_at = next + (in_flight as u64) * (chunk as u64);
-                if queued_at < size {
-                    start_fill(queued_at, &job_tx)?;
-                    in_flight += 1;
+        match write_exact_or_report(io, off, &buf.as_ref()[..len], plan.skip_bad_sectors, bad) {
+            Ok(n) => {
+                written += n as u64;
+                since_journal += n as u64;
+                let pos = off + n as u64;
+                let (bps, eta) = meter.snapshot(pos, size);
+                emit_pass(
+                    on_progress,
+                    Phase::Writing,
+                    pass_no,
+                    total_passes,
+                    plan,
+                    pos,
+                    bps,
+                    eta,
+                    None,
+                );
+                if since_journal >= plan.chunk_size || pos >= size {
+                    journal.offset = pos;
+                    journal.phase = "writing".into();
+                    if let Err(e) = journal::checkpoint(journal_path, journal) {
+                        shutdown(&job_tx, fill);
+                        return Err(e);
+                    }
+                    since_journal = 0;
                 }
+            }
+            Err(e) => {
+                shutdown(&job_tx, fill);
+                return Err(e);
             }
         }
     }
@@ -539,7 +498,6 @@ pub fn write_pass_double_buffered(
         Ok(()) => {}
         Err(_) => return Err(Error::Message("fill thread panicked".into())),
     }
-    let _ = rng_seed;
     Ok(written)
 }
 

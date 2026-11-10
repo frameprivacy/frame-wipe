@@ -273,7 +273,10 @@ pub fn elevation_hint() -> &'static str {
 pub fn raw_path_for(display_or_path: &Path) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        return macos::prefer_rdisk(display_or_path);
+        macos::prefer_rdisk(display_or_path)
     }
-    display_or_path.to_path_buf()
+    #[cfg(not(target_os = "macos"))]
+    {
+        display_or_path.to_path_buf()
+    }
 }
