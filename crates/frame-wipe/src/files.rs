@@ -45,7 +45,7 @@ pub fn wipe_tree(
     if !meta.is_dir() {
         return Err(Error::InvalidTarget(root.to_path_buf()));
     }
-    let start_dev = file_dev(&meta);
+    let start_dev = file_dev(root, &meta);
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = fs::read_dir(&dir).map_err(|e| Error::Open {
@@ -65,7 +65,7 @@ pub fn wipe_tree(
             if meta.file_type().is_symlink() {
                 return Err(Error::Symlink(path));
             }
-            if file_dev(&meta) != start_dev {
+            if file_dev(&path, &meta) != start_dev {
                 // Do not cross filesystem / mount boundaries.
                 continue;
             }
@@ -130,18 +130,17 @@ fn wipe_one_file(
 }
 
 #[cfg(unix)]
-fn file_dev(meta: &std::fs::Metadata) -> u64 {
+fn file_dev(_path: &std::path::Path, meta: &std::fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     meta.dev()
 }
 
 #[cfg(windows)]
-fn file_dev(meta: &std::fs::Metadata) -> u64 {
-    use std::os::windows::fs::MetadataExt;
-    meta.volume_serial_number().unwrap_or(0) as u64
+fn file_dev(path: &std::path::Path, _meta: &std::fs::Metadata) -> u64 {
+    crate::device::win_meta::volume_serial(path).unwrap_or(0)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_dev(_meta: &std::fs::Metadata) -> u64 {
+fn file_dev(_path: &std::path::Path, _meta: &std::fs::Metadata) -> u64 {
     0
 }

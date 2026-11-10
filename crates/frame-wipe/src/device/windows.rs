@@ -11,15 +11,15 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::{
-    GetTokenInformation, OpenProcessToken, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, GetFileInformationByHandle,
-    GetVolumePathNameW, GetVolumePathNamesForVolumeNameW, GetWindowsDirectoryW,
-    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING,
+    GetVolumePathNameW, GetVolumePathNamesForVolumeNameW, BY_HANDLE_FILE_INFORMATION,
+    FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::Win32::System::IO::DeviceIoControl;
 
 const GENERIC_READ: u32 = 0x8000_0000;
@@ -33,7 +33,7 @@ const PROPERTY_STANDARD_QUERY: u32 = 0;
 
 pub fn is_elevated() -> bool {
     unsafe {
-        let mut token: HANDLE = 0;
+        let mut token: HANDLE = ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
             return false;
         }
@@ -292,7 +292,7 @@ fn open_ro(path: &str) -> Result<HANDLE, Error> {
             ptr::null(),
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL,
-            0,
+            ptr::null_mut(),
         )
     };
     if h == INVALID_HANDLE_VALUE {

@@ -218,7 +218,7 @@ fn windows_open(path: &Path, rw: bool, direct: bool) -> Result<File, Error> {
             ptr::null(),
             OPEN_EXISTING,
             flags,
-            0,
+            std::ptr::null_mut(),
         )
     };
     if h == INVALID_HANDLE_VALUE {
@@ -273,7 +273,7 @@ fn lock_exclusive(file: &File, path: &Path) -> Result<(), Error> {
         let mut ov: OVERLAPPED = unsafe { zeroed() };
         let ok = unsafe {
             LockFileEx(
-                file.as_raw_handle() as isize,
+                file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE,
                 LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
                 0,
                 0xFFFF_FFFF,

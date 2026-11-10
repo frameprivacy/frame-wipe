@@ -15,7 +15,7 @@ mod windows;
 #[cfg(unix)]
 mod unix_meta;
 #[cfg(windows)]
-mod win_meta;
+pub(crate) mod win_meta;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EnumerateOptions {
