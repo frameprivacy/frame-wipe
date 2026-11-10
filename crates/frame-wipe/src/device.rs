@@ -6,6 +6,8 @@ use crate::planner::{MediaKind, TargetSnapshot};
 use crate::safety;
 use std::path::{Path, PathBuf};
 
+mod kind;
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]

@@ -268,18 +268,7 @@ fn volume_display_name(path: &Path) -> String {
 }
 
 fn kind_from_bus(bus: Option<&str>, model: Option<&str>) -> MediaKind {
-    let blob = format!("{} {}", bus.unwrap_or(""), model.unwrap_or("")).to_ascii_lowercase();
-    if blob.contains("nvme") || blob.contains("nvm express") {
-        MediaKind::Nvme
-    } else if blob.contains("ssd") || blob.contains("solid") {
-        MediaKind::Ssd
-    } else if blob.contains("virtual") || blob.contains("vhd") || blob.contains("vhdx") {
-        MediaKind::Virtual
-    } else if blob.contains("cdrom") || blob.contains("dvd") {
-        MediaKind::Optical
-    } else {
-        MediaKind::Unknown
-    }
+    super::kind::from_windows_bus(bus, model)
 }
 
 fn open_ro(path: &str) -> Result<HANDLE, Error> {

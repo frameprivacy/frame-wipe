@@ -115,22 +115,7 @@ fn inspect_named(id: &str, system: &[String], app: &[String]) -> Result<TargetSn
             .and_then(|i| i.media_type.clone())
             .map(|s| s.to_ascii_lowercase().contains("disk image"))
             .unwrap_or(false);
-    let kind = if virtual_media {
-        MediaKind::Virtual
-    } else if protocol.eq_ignore_ascii_case("PCI-Express")
-        || id.contains("nvme")
-        || protocol.to_ascii_lowercase().contains("nvme")
-    {
-        MediaKind::Nvme
-    } else if solid {
-        MediaKind::Ssd
-    } else if protocol.to_ascii_lowercase().contains("disc") {
-        MediaKind::Optical
-    } else if info.is_some() {
-        MediaKind::Hdd
-    } else {
-        MediaKind::Unknown
-    };
+    let kind = super::kind::from_macos_signals(&protocol, solid, virtual_media, id, info.is_some());
     let mounts = info
         .as_ref()
         .and_then(|i| i.mount_point.clone())

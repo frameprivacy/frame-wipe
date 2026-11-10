@@ -2127,7 +2127,7 @@ fn demo_devices() -> Vec<DeviceInfo> {
             "SanDisk USB 3.2",
             Some("AA0102030405"),
             124_000_000_000,
-            MediaKind::Ssd,
+            MediaKind::Usb,
             false,
             false,
             vec![],

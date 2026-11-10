@@ -3,7 +3,7 @@
 use crate::device::{DeviceInfo, EnumerateOptions};
 use crate::error::Error;
 use crate::identity::DeviceIdentity;
-use crate::planner::{MediaKind, TargetSnapshot};
+use crate::planner::TargetSnapshot;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
@@ -147,6 +147,13 @@ fn inspect_named(
         .or_else(|| nvme_serial(name));
     let wwn = read_trim(&sys.join("device/wwid")).or_else(|| read_trim(&sys.join("wwid")));
     let rotational = read_trim(&sys.join("queue/rotational"));
+    let removable = read_trim(&sys.join("removable"));
+    let on_usb = fs::canonicalize(&sys)
+        .or_else(|_| fs::canonicalize(sys.join("device")))
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .map(|s| super::kind::sysfs_path_is_usb(&s))
+        .unwrap_or(false);
     let block = read_u64(&sys.join("queue/logical_block_size")).unwrap_or(512);
     let backing = read_trim(&sys.join("loop/backing_file")).map(PathBuf::from);
     let holders = list_names(&sys.join("holders"));
@@ -157,23 +164,13 @@ fn inspect_named(
     let is_lvm = name.starts_with("dm-")
         || sys.join("dm").exists()
         || holders.iter().any(|h| h.starts_with("dm-"));
-    let kind = if name.starts_with("loop") {
-        MediaKind::Loop
-    } else if name.starts_with("ram") || name.starts_with("zram") {
-        MediaKind::Ram
-    } else if backing.is_some() {
-        MediaKind::Virtual
-    } else if name.starts_with("nvme") {
-        MediaKind::Nvme
-    } else if name.starts_with("sr") {
-        MediaKind::Optical
-    } else if rotational.as_deref() == Some("0") {
-        MediaKind::Ssd
-    } else if rotational.as_deref() == Some("1") {
-        MediaKind::Hdd
-    } else {
-        MediaKind::Unknown
-    };
+    let kind = super::kind::from_linux_signals(
+        name,
+        rotational.as_deref(),
+        removable.as_deref(),
+        on_usb,
+        backing.is_some(),
+    );
     let dev_path = PathBuf::from(format!("/dev/{name}"));
     let our_mounts: Vec<String> = mounts
         .iter()
