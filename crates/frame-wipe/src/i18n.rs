@@ -193,6 +193,8 @@ pub fn t(lang: Lang, key: &str) -> &'static str {
         (Lang::Fr, "ui.working") => "Ecrasement en cours",
         (Lang::En, "ui.confirm_name") => "Device name",
         (Lang::Fr, "ui.confirm_name") => "Nom du peripherique",
+        (Lang::En, "ui.select_hint") => "Select a drive to set up an overwrite.",
+        (Lang::Fr, "ui.select_hint") => "Selectionnez un disque pour preparer un ecrasement.",
         _ => "??",
     }
 }

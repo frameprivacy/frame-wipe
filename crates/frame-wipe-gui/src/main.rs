@@ -3,7 +3,8 @@
 mod theme;
 
 use eframe::egui::{
-    self, Align, Color32, CornerRadius, FontId, Layout, RichText, Sense, Stroke, Ui, Vec2,
+    self, Align, Align2, Color32, CornerRadius, FontId, Layout, Pos2, RichText, Sense, Stroke,
+    StrokeKind, Ui, Vec2,
 };
 use frame_wipe::device::{self, DeviceInfo, EnumerateOptions};
 use frame_wipe::engine::{wipe, WipeRequest};
@@ -215,6 +216,8 @@ struct App {
     ready_frames: u32,
     demo: bool,
     scale: f32,
+    window_w: f32,
+    window_h: f32,
 }
 
 impl App {
@@ -246,6 +249,8 @@ impl App {
             ready_frames: 0,
             demo: args.demo,
             scale: args.scale.max(0.5),
+            window_w: args.width.max(320.0),
+            window_h: args.height.max(240.0),
         };
         if args.demo {
             app.apply_demo(args.demo_state);
@@ -480,6 +485,13 @@ impl App {
     fn tick(&mut self, ctx: &egui::Context) {
         ctx.set_pixels_per_point(self.scale);
         theme::apply(ctx);
+        if self.demo {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                self.window_w,
+                self.window_h,
+            )));
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Pos2::ZERO));
+        }
         while let Ok(ev) = self.ev_rx.try_recv() {
             match ev {
                 UiEvent::Progress(p) => {
@@ -515,7 +527,7 @@ impl App {
 
         handle_keys(self, ctx);
 
-        let header_h = GRID * 6.0;
+        let header_h = GRID * 5.5;
         let pad = GRID * 2.0;
         let screen = ctx.screen_rect();
 
@@ -560,6 +572,12 @@ impl App {
                             lang_toggle(ui, &mut self.lang);
                         });
                     },
+                );
+                let r = ui.max_rect();
+                ui.painter().hline(
+                    r.x_range(),
+                    r.bottom() - 0.5,
+                    Stroke::new(1.0_f32, theme::BORDER),
                 );
             });
 
@@ -721,32 +739,46 @@ impl App {
             Sense::click()
         };
         let inner = frame.show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.set_width(ui.available_width());
-            ui.set_opacity(if blocked.is_some() { 0.48 } else { 1.0 });
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&model)
-                            .font(FontId::new(FONT_BODY, theme::semibold()))
-                            .color(theme::TEXT),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(&size)
-                                .font(FontId::new(FONT_BODY, theme::medium()))
-                                .color(theme::STEEL_50),
-                        );
-                    });
-                });
-                ui.add_space(2.0);
-                ui.label(
-                    RichText::new(format!("{name}  ·  {serial}  ·  {kind}"))
-                        .font(FontId::new(FONT_SMALL, font_family_prop()))
-                        .color(theme::STEEL_400),
-                );
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
+            let inner_w = ui.available_width();
+            ui.set_min_width(inner_w);
+            ui.set_width(inner_w);
+            if blocked.is_some() {
+                ui.set_opacity(0.48);
+            }
+            // Title and size on one reserved row so right-to-left layout cannot
+            // stretch the frame or push the tag row outside the border.
+            let title_h = 20.0;
+            let (title_rect, _) =
+                ui.allocate_exact_size(Vec2::new(inner_w, title_h), Sense::hover());
+            ui.painter().text(
+                Pos2::new(title_rect.left(), title_rect.center().y),
+                Align2::LEFT_CENTER,
+                &model,
+                FontId::new(FONT_BODY, theme::semibold()),
+                theme::TEXT,
+            );
+            ui.painter().text(
+                Pos2::new(title_rect.right(), title_rect.center().y),
+                Align2::RIGHT_CENTER,
+                &size,
+                FontId::new(FONT_BODY, theme::medium()),
+                theme::STEEL_50,
+            );
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(format!("{name}  ·  {serial}  ·  {kind}"))
+                    .font(FontId::new(FONT_SMALL, font_family_prop()))
+                    .color(theme::STEEL_400),
+            );
+            ui.add_space(6.0);
+            // Reserved tag row: the frame min_rect always includes this height,
+            // so the border encloses the pills even when they wrap.
+            let tag_h = 22.0;
+            ui.allocate_ui_with_layout(
+                Vec2::new(inner_w, tag_h),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_size(Vec2::new(inner_w, tag_h));
                     ui.spacing_mut().item_spacing.x = 6.0;
                     pill(ui, kind, theme::STEEL_400, theme::SURFACE_RAISED);
                     if snap.is_system {
@@ -764,8 +796,8 @@ impl App {
                     if snap.is_raid_member || snap.is_lvm_member {
                         pill(ui, self.t("ui.raid"), theme::WARNING, theme::WARNING_BG);
                     }
-                });
-            });
+                },
+            );
         });
         let resp = inner.response.interact(sense);
         if blocked.is_some() && resp.hovered() {
@@ -803,42 +835,38 @@ impl App {
         let w = ui.available_width();
         ui.allocate_ui(Vec2::new(w, h), |ui| {
             ui.set_min_size(Vec2::new(w, h));
+            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
             ui.label(
                 RichText::new(self.t("ui.drives_summary"))
                     .font(FontId::new(FONT_TITLE, theme::semibold()))
                     .color(theme::TEXT),
             );
+            ui.label(
+                RichText::new(self.t("ui.select_hint"))
+                    .color(theme::STEEL_400)
+                    .size(FONT_BODY),
+            );
             ui.add_space(GRID);
             let total = self.devices.len();
             let open = self.selectable_indices().len();
             let protected = total.saturating_sub(open);
-            let gap = GRID;
-            let chip_w = ((w - gap * 2.0) / 3.0).max(120.0);
-            let chip_h = GRID * 10.0;
-            ui.allocate_ui_with_layout(
-                Vec2::new(w, chip_h),
-                Layout::left_to_right(Align::Min),
-                |ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for (val, lab, col) in [
-                        (
-                            format!("{open}"),
-                            self.t("ui.can_overwrite"),
-                            theme::RESOLVED,
-                        ),
-                        (
-                            format!("{protected}"),
-                            self.t("ui.protected_count"),
-                            theme::WARNING,
-                        ),
-                        (format!("{total}"), self.t("ui.devices"), theme::STEEL_200),
-                    ] {
-                        ui.allocate_ui(Vec2::new(chip_w, chip_h), |ui| {
-                            stat_chip(ui, &val, lab, col, chip_w, chip_h);
-                        });
-                    }
-                },
+            stat_row(
+                ui,
+                w,
+                &[
+                    (
+                        format!("{open}"),
+                        self.t("ui.can_overwrite"),
+                        theme::RESOLVED,
+                    ),
+                    (
+                        format!("{protected}"),
+                        self.t("ui.protected_count"),
+                        theme::WARNING,
+                    ),
+                    (format!("{total}"), self.t("ui.devices"), theme::STEEL_200),
+                ],
             );
             ui.add_space(GRID * 2.0);
             if total == 0 && self.list_error.is_none() {
@@ -857,68 +885,84 @@ impl App {
                 ui.add_space(GRID);
             }
 
-            let protected_block = |ui: &mut Ui| {
-                if protected == 0 {
-                    return;
-                }
-                wide_card(ui, |ui| {
-                    ui.label(
-                        RichText::new(self.t("ui.protected"))
-                            .font(FontId::new(FONT_BODY, theme::semibold())),
-                    );
-                    ui.add_space(GRID * 0.5);
-                    for d in &self.devices {
-                        if protection(&d.snapshot).is_some() {
-                            let model = display_model(&d.snapshot, self.lang);
-                            let why = protection(&d.snapshot).map(|k| self.t(k)).unwrap_or("");
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}  ·  {}",
-                                    d.snapshot.identity.display_name, model
-                                ))
-                                .color(theme::TEXT)
-                                .size(FONT_BODY),
-                            );
-                            ui.label(RichText::new(why).color(theme::STEEL_400).size(FONT_SMALL));
-                            ui.add_space(GRID * 0.5);
-                        }
-                    }
-                });
-            };
-            let tips_block = |ui: &mut Ui| {
-                wide_card(ui, |ui| {
-                    ui.label(
-                        RichText::new(self.t("ui.tips"))
-                            .font(FontId::new(FONT_BODY, theme::semibold())),
-                    );
-                    ui.add_space(GRID);
-                    for key in ["ui.tip1", "ui.tip2", "ui.tip3"] {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("·").color(theme::STEEL_400));
-                            ui.label(
-                                RichText::new(self.t(key))
-                                    .color(theme::STEEL_200)
-                                    .size(FONT_BODY),
-                            );
+            let rest = ui.available_height().max(120.0);
+            let two_col = w >= 520.0 && protected > 0;
+            if two_col {
+                let gap = GRID * 2.0;
+                let col_w = ((w - gap) / 2.0).floor();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(w, rest),
+                    Layout::left_to_right(Align::Min),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
+                            fill_card(ui, col_w, rest, |ui| {
+                                self.protected_list(ui);
+                            });
                         });
-                        ui.add_space(4.0);
-                    }
-                });
-            };
-
-            if w >= 900.0 && protected > 0 {
-                ui.columns(2, |cols| {
-                    protected_block(&mut cols[0]);
-                    tips_block(&mut cols[1]);
-                });
+                        ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
+                            fill_card(ui, col_w, rest, |ui| {
+                                self.tips_list(ui);
+                            });
+                        });
+                    },
+                );
             } else {
-                protected_block(ui);
                 if protected > 0 {
+                    let half = ((rest - GRID * 2.0) / 2.0).max(80.0);
+                    fill_card(ui, w, half, |ui| {
+                        self.protected_list(ui);
+                    });
                     ui.add_space(GRID * 2.0);
+                    fill_card(ui, w, ui.available_height().max(80.0), |ui| {
+                        self.tips_list(ui);
+                    });
+                } else {
+                    fill_card(ui, w, rest, |ui| {
+                        self.tips_list(ui);
+                    });
                 }
-                tips_block(ui);
             }
         });
+    }
+
+    fn protected_list(&self, ui: &mut Ui) {
+        ui.label(
+            RichText::new(self.t("ui.protected")).font(FontId::new(FONT_BODY, theme::semibold())),
+        );
+        ui.add_space(GRID * 0.5);
+        for d in &self.devices {
+            if protection(&d.snapshot).is_some() {
+                let model = display_model(&d.snapshot, self.lang);
+                let why = protection(&d.snapshot).map(|k| self.t(k)).unwrap_or("");
+                ui.label(
+                    RichText::new(format!(
+                        "{}  ·  {}",
+                        d.snapshot.identity.display_name, model
+                    ))
+                    .color(theme::TEXT)
+                    .size(FONT_BODY),
+                );
+                ui.label(RichText::new(why).color(theme::STEEL_400).size(FONT_SMALL));
+                ui.add_space(GRID * 0.5);
+            }
+        }
+    }
+
+    fn tips_list(&self, ui: &mut Ui) {
+        ui.label(RichText::new(self.t("ui.tips")).font(FontId::new(FONT_BODY, theme::semibold())));
+        ui.add_space(GRID);
+        for key in ["ui.tip1", "ui.tip2", "ui.tip3"] {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("·").color(theme::STEEL_400));
+                ui.label(
+                    RichText::new(self.t(key))
+                        .color(theme::STEEL_200)
+                        .size(FONT_BODY),
+                );
+            });
+            ui.add_space(4.0);
+        }
     }
 
     fn detail_selected(&mut self, ui: &mut Ui, h: f32) {
@@ -937,6 +981,11 @@ impl App {
         let t_over = self.t("ui.overwrite");
         let t_est = self.t("ui.estimate");
         let t_est_note = self.t("ui.estimate_note");
+        let t_serial = self.t("ui.serial");
+        let t_path = self.t("ui.path");
+        let t_size = self.t("ui.size");
+        let t_type = self.t("ui.type");
+        let t_mounted = self.t("ui.mounted");
         let model = display_model(&snap, self.lang);
         let serial = snap
             .identity
@@ -947,125 +996,153 @@ impl App {
         let mounted = !snap.mounts.is_empty();
         let blocked = protection(&snap).is_some();
         let w = ui.available_width();
-        let footer_h = GRID * 9.0;
+        let footer_h = GRID * 8.0;
         let body_h = (h - footer_h).max(120.0);
+        let two_col = w >= 560.0;
 
         ui.allocate_ui(Vec2::new(w, h), |ui| {
             ui.set_min_size(Vec2::new(w, h));
             ui.set_max_size(Vec2::new(w, h));
+            ui.set_width(w);
             ui.allocate_ui(Vec2::new(w, body_h), |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.set_width(w);
-                        ui.label(
-                            RichText::new(&model)
-                                .font(FontId::new(FONT_TITLE, theme::semibold()))
-                                .color(theme::TEXT),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{}  ·  {}  ·  {}",
-                                snap.identity.display_name,
-                                snap.kind.label(),
-                                format_bytes(snap.identity.size)
-                            ))
-                            .color(theme::STEEL_200)
+                ui.set_width(w);
+                ui.set_max_height(body_h);
+                ui.label(
+                    RichText::new(&model)
+                        .font(FontId::new(FONT_TITLE, theme::semibold()))
+                        .color(theme::TEXT),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{}  ·  {}  ·  {}",
+                        snap.identity.display_name,
+                        snap.kind.label(),
+                        format_bytes(snap.identity.size)
+                    ))
+                    .color(theme::STEEL_200)
+                    .size(FONT_BODY),
+                );
+                ui.add_space(GRID);
+                if mounted && self.scope == ScopeKind::Whole {
+                    ui.label(
+                        RichText::new(self.t("ui.mounted_hint"))
+                            .color(theme::WARNING)
                             .size(FONT_BODY),
-                        );
-                        ui.add_space(GRID);
-                        wide_card(ui, |ui| {
-                            kv(ui, self.t("ui.serial"), &serial);
-                            kv(
-                                ui,
-                                self.t("ui.path"),
-                                &snap.identity.path.display().to_string(),
-                            );
-                            kv(
-                                ui,
-                                self.t("ui.size"),
-                                &format!(
-                                    "{} ({} bytes)",
-                                    format_bytes(snap.identity.size),
-                                    snap.identity.size
-                                ),
-                            );
-                            kv(ui, self.t("ui.type"), snap.kind.label());
-                            if !snap.mounts.is_empty() {
-                                kv(ui, self.t("ui.mounted"), &snap.mounts.join(", "));
-                            }
-                        });
-                        if mounted && self.scope == ScopeKind::Whole {
-                            ui.add_space(GRID);
-                            ui.label(
-                                RichText::new(self.t("ui.mounted_hint"))
-                                    .color(theme::WARNING)
-                                    .size(FONT_BODY),
-                            );
-                        }
-                        ui.add_space(GRID * 2.0);
-                        ui.label(
-                            RichText::new(t_scope)
-                                .font(FontId::new(FONT_SMALL, theme::medium()))
-                                .color(theme::STEEL_400),
-                        );
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
-                            scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
-                        });
-                        ui.add_space(GRID);
-                        ui.label(
-                            RichText::new(t_method)
-                                .font(FontId::new(FONT_SMALL, theme::medium()))
-                                .color(theme::STEEL_400),
-                        );
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
-                            method_choice(ui, &mut self.method, MethodKind::Random, t_random);
-                            method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
-                        });
-                        ui.add_space(GRID);
-                        ui.checkbox(&mut self.verify, t_verify);
-                        ui.checkbox(&mut self.dry_run, t_dry);
-                        ui.add_space(GRID * 2.0);
-                        let est = rough_estimate(snap.identity.size, self.method, self.verify);
-                        wide_card(ui, |ui| {
-                            ui.label(
-                                RichText::new(t_est)
-                                    .font(FontId::new(FONT_SMALL, theme::medium()))
-                                    .color(theme::STEEL_400),
-                            );
-                            ui.label(
-                                RichText::new(est)
-                                    .font(FontId::new(FONT_HEAD, theme::semibold()))
-                                    .color(theme::TEXT),
-                            );
-                            ui.label(
-                                RichText::new(t_est_note)
-                                    .color(theme::STEEL_400)
-                                    .size(FONT_SMALL),
-                            );
-                        });
+                    );
+                    ui.add_space(GRID);
+                }
+                let rest = ui.available_height().max(80.0);
+                let identity = |ui: &mut Ui| {
+                    kv(ui, t_serial, &serial);
+                    kv(ui, t_path, &snap.identity.path.display().to_string());
+                    kv(
+                        ui,
+                        t_size,
+                        &format!(
+                            "{} ({} bytes)",
+                            format_bytes(snap.identity.size),
+                            snap.identity.size
+                        ),
+                    );
+                    kv(ui, t_type, snap.kind.label());
+                    if !snap.mounts.is_empty() {
+                        kv(ui, t_mounted, &snap.mounts.join(", "));
+                    }
+                };
+                let options = |ui: &mut Ui| {
+                    ui.label(
+                        RichText::new(t_scope)
+                            .font(FontId::new(FONT_SMALL, theme::medium()))
+                            .color(theme::STEEL_400),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
+                        scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
                     });
+                    ui.add_space(GRID);
+                    ui.label(
+                        RichText::new(t_method)
+                            .font(FontId::new(FONT_SMALL, theme::medium()))
+                            .color(theme::STEEL_400),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
+                        method_choice(ui, &mut self.method, MethodKind::Random, t_random);
+                        method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
+                    });
+                    ui.add_space(GRID);
+                    ui.checkbox(&mut self.verify, t_verify);
+                    ui.checkbox(&mut self.dry_run, t_dry);
+                    ui.add_space(GRID * 1.5);
+                    let est = rough_estimate(snap.identity.size, self.method, self.verify);
+                    ui.label(
+                        RichText::new(t_est)
+                            .font(FontId::new(FONT_SMALL, theme::medium()))
+                            .color(theme::STEEL_400),
+                    );
+                    ui.label(
+                        RichText::new(est)
+                            .font(FontId::new(FONT_HEAD, theme::semibold()))
+                            .color(theme::TEXT),
+                    );
+                    ui.label(
+                        RichText::new(t_est_note)
+                            .color(theme::STEEL_400)
+                            .size(FONT_SMALL),
+                    );
+                };
+                if two_col {
+                    let gap = GRID * 2.0;
+                    let col_w = ((w - gap) / 2.0).floor();
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(w, rest),
+                        Layout::left_to_right(Align::Min),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
+                                fill_card(ui, col_w, rest, identity);
+                            });
+                            ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
+                                fill_card(ui, col_w, rest, options);
+                            });
+                        },
+                    );
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .max_height(rest)
+                        .show(ui, |ui| {
+                            ui.set_width(w);
+                            fill_card(ui, w, 0.0, identity);
+                            ui.add_space(GRID * 2.0);
+                            fill_card(ui, w, 0.0, options);
+                        });
+                }
             });
             ui.allocate_ui_with_layout(
                 Vec2::new(w, footer_h),
-                Layout::top_down(Align::Min),
+                Layout::bottom_up(Align::Min),
                 |ui| {
                     ui.set_width(w);
-                    ui.add_space(GRID * 2.0);
-                    if let Some(err) = &self.error {
-                        ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
-                        ui.add_space(GRID);
-                    }
                     let enabled =
                         !blocked && !self.running && !(mounted && self.scope == ScopeKind::Whole);
-                    let btn = danger_button(ui, t_over, enabled);
+                    let btn = danger_button_width(ui, t_over, enabled, w);
                     if btn.clicked() {
                         self.try_open_confirm();
                     }
+                    if let Some(err) = &self.error {
+                        ui.add_space(GRID);
+                        ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
+                    }
+                    ui.add_space(GRID);
+                    let r = ui.max_rect();
+                    ui.painter().hline(
+                        r.x_range(),
+                        r.top() + 0.5,
+                        Stroke::new(1.0_f32, theme::BORDER),
+                    );
                 },
             );
         });
@@ -1287,9 +1364,24 @@ impl App {
 
 fn wide_card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     let w = ui.available_width();
-    ui.allocate_ui_with_layout(Vec2::new(w, 0.0), Layout::top_down(Align::Min), |ui| {
+    fill_card(ui, w, 0.0, add);
+}
+
+/// Card that occupies a fixed width and, when `h` is greater than 0, a fixed height.
+fn fill_card(ui: &mut Ui, w: f32, h: f32, add: impl FnOnce(&mut Ui)) {
+    let height = if h > 0.0 { h } else { 0.0 };
+    ui.allocate_ui_with_layout(Vec2::new(w, height), Layout::top_down(Align::Min), |ui| {
+        if h > 0.0 {
+            ui.set_min_size(Vec2::new(w, h));
+            ui.set_max_size(Vec2::new(w, h));
+        }
+        ui.set_width(w);
         theme::card_frame().show(ui, |ui| {
-            ui.set_min_width((w - 26.0).max(0.0));
+            let inner_w = (w - 26.0).max(0.0);
+            ui.set_min_width(inner_w);
+            if h > 0.0 {
+                ui.set_min_height((h - 26.0).max(0.0));
+            }
             ui.set_width(ui.available_width());
             add(ui);
         });
@@ -1420,29 +1512,42 @@ fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) {
         });
 }
 
-fn stat_chip(ui: &mut Ui, value: &str, label: &str, color: Color32, w: f32, h: f32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-    ui.allocate_new_ui(
-        egui::UiBuilder::new()
-            .max_rect(rect)
-            .layout(Layout::top_down(Align::Min)),
+fn stat_row(ui: &mut Ui, w: f32, items: &[(String, &str, Color32)]) {
+    let n = items.len().max(1) as f32;
+    let gap = GRID;
+    let chip_w = ((w - gap * (n - 1.0)) / n).floor().max(80.0);
+    let chip_h = GRID * 11.0;
+    ui.allocate_ui_with_layout(
+        Vec2::new(w, chip_h),
+        Layout::left_to_right(Align::Center),
         |ui| {
-            theme::card_frame().show(ui, |ui| {
-                ui.set_min_size(Vec2::new((w - 2.0).max(0.0), (h - 2.0).max(0.0)));
-                ui.set_width(ui.available_width());
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(value)
-                            .font(FontId::new(FONT_TITLE, theme::semibold()))
-                            .color(color),
-                    );
-                    ui.label(
-                        RichText::new(label)
-                            .color(theme::STEEL_400)
-                            .size(FONT_SMALL),
-                    );
-                });
-            });
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.set_height(chip_h);
+            for (val, lab, col) in items {
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(chip_w, chip_h), Sense::hover());
+                ui.painter().rect(
+                    rect,
+                    CornerRadius::same(8),
+                    theme::SURFACE,
+                    Stroke::new(1.0_f32, theme::BORDER),
+                    StrokeKind::Inside,
+                );
+                let pad = 12.0;
+                ui.painter().text(
+                    Pos2::new(rect.left() + pad, rect.top() + pad),
+                    Align2::LEFT_TOP,
+                    val,
+                    FontId::new(FONT_TITLE, theme::semibold()),
+                    *col,
+                );
+                ui.painter().text(
+                    Pos2::new(rect.left() + pad, rect.top() + pad + 28.0),
+                    Align2::LEFT_TOP,
+                    *lab,
+                    FontId::new(FONT_SMALL, font_family_prop()),
+                    theme::STEEL_400,
+                );
+            }
         },
     );
 }
@@ -1459,22 +1564,37 @@ fn text_btn(ui: &mut Ui, label: &str) -> egui::Response {
 
 fn danger_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
     let w = ui.available_width().max(160.0);
-    let h = GRID * 5.0;
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(
-            RichText::new(label)
-                .font(FontId::new(FONT_BODY, theme::semibold()))
-                .color(if enabled { theme::BG } else { theme::STEEL_400 }),
-        )
-        .fill(if enabled {
-            theme::CRITICAL
-        } else {
-            theme::SURFACE_RAISED
-        })
-        .corner_radius(CornerRadius::same(8))
-        .min_size(Vec2::new(w, h)),
+    danger_button_width(ui, label, enabled, w)
+}
+
+fn danger_button_width(ui: &mut Ui, label: &str, enabled: bool, w: f32) -> egui::Response {
+    let h = GRID * 5.5;
+    // Allocate the exact panel width first so the button cannot shrink to
+    // content size or sit at half width.
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+    ui.allocate_new_ui(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Center)),
+        |ui| {
+            ui.add_enabled(
+                enabled,
+                egui::Button::new(
+                    RichText::new(label)
+                        .font(FontId::new(FONT_BODY, theme::semibold()))
+                        .color(if enabled { theme::BG } else { theme::STEEL_400 }),
+                )
+                .fill(if enabled {
+                    theme::CRITICAL
+                } else {
+                    theme::SURFACE_RAISED
+                })
+                .corner_radius(CornerRadius::same(8))
+                .min_size(Vec2::new(w, h)),
+            )
+        },
     )
+    .inner
 }
 
 fn scope_choice(ui: &mut Ui, current: &mut ScopeKind, value: ScopeKind, label: &str) {
