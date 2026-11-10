@@ -20,6 +20,20 @@ use time::OffsetDateTime;
 const FILL_DIR: &str = ".framewipe-free";
 const FILE_SIZE: u64 = 64 * 1024 * 1024;
 
+#[cfg(test)]
+static TEST_FILE_CAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn file_cap() -> u64 {
+    #[cfg(test)]
+    {
+        let n = TEST_FILE_CAP.load(Ordering::SeqCst);
+        if n > 0 {
+            return n;
+        }
+    }
+    FILE_SIZE
+}
+
 pub fn wipe_free_space(
     mount: &Path,
     method: Method,
@@ -93,9 +107,11 @@ pub fn wipe_free_space(
             }
             let path = dir.join(format!("fill-{index:06}"));
             index += 1;
-            match fill_one(&path, FILE_SIZE, pattern, &mut rng, cancel, &mut bytes) {
+            // Record the path before writing so cancel or I/O errors mid-fill
+            // still clean the file up.
+            files.push(path.clone());
+            match fill_one(&path, file_cap(), pattern, &mut rng, cancel, &mut bytes) {
                 Ok(true) => {
-                    files.push(path);
                     on_progress(Progress {
                         phase: Phase::Writing,
                         pass: 1,
@@ -119,10 +135,29 @@ pub fn wipe_free_space(
     let mut cleanup_err: Option<Error> = None;
     for p in files.iter().rev() {
         if let Err(e) = fs::remove_file(p) {
-            cleanup_err = Some(Error::Message(format!(
-                "failed to remove {}: {e}",
-                p.display()
-            )));
+            if e.kind() != std::io::ErrorKind::NotFound {
+                cleanup_err = Some(Error::Message(format!(
+                    "failed to remove {}: {e}",
+                    p.display()
+                )));
+            }
+        }
+    }
+    // Sweep anything still in the filler directory (for example a file
+    // created just as we were cancelled, or a name we failed to record).
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for ent in entries.flatten() {
+            let p = ent.path();
+            if p.is_file() {
+                if let Err(e) = fs::remove_file(&p) {
+                    if e.kind() != std::io::ErrorKind::NotFound && cleanup_err.is_none() {
+                        cleanup_err = Some(Error::Message(format!(
+                            "failed to remove {}: {e}",
+                            p.display()
+                        )));
+                    }
+                }
+            }
         }
     }
     if let Err(e) = fs::remove_dir(&dir) {
@@ -228,4 +263,70 @@ fn fill_one(
 fn is_no_space(err: &std::io::Error) -> bool {
     // Unix ENOSPC = 28, Windows ERROR_DISK_FULL = 112, ERROR_HANDLE_DISK_FULL = 39.
     matches!(err.raw_os_error(), Some(28) | Some(112) | Some(39))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::method::Method;
+    use crate::safety::SafetyFlags;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn cancel_mid_write_removes_filler_files() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
+        TEST_FILE_CAP.store(512 * 1024 * 1024, Ordering::SeqCst);
+
+        let mount = dir.path().to_path_buf();
+        let name = mount.file_name().unwrap().to_string_lossy().into_owned();
+        let flags = SafetyFlags {
+            explicit_target: true,
+            assume_yes: true,
+            typed_confirm: Some(name),
+            countdown_secs: 1,
+            ..SafetyFlags::default()
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_w = cancel.clone();
+        let mount_w = mount.clone();
+        let handle = std::thread::spawn(move || {
+            wipe_free_space(&mount_w, Method::zeros(), flags, &cancel_w, |_| {})
+        });
+
+        let fill_dir = mount.join(FILL_DIR);
+        let first = fill_dir.join("fill-000000");
+        let start = Instant::now();
+        while !first.exists() {
+            if start.elapsed() > Duration::from_secs(15) {
+                cancel.store(true, Ordering::SeqCst);
+                let _ = handle.join();
+                TEST_FILE_CAP.store(0, Ordering::SeqCst);
+                panic!("filler file was never created");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        cancel.store(true, Ordering::SeqCst);
+        let result = handle.join().expect("wipe thread panicked");
+        TEST_FILE_CAP.store(0, Ordering::SeqCst);
+        assert!(
+            matches!(result, Err(Error::Cancelled)),
+            "expected cancel, got {result:?}"
+        );
+        assert!(
+            !first.exists(),
+            "filler file left behind at {}",
+            first.display()
+        );
+        assert!(
+            !fill_dir.exists(),
+            "filler directory left behind at {}",
+            fill_dir.display()
+        );
+    }
 }

@@ -144,8 +144,76 @@ fn normalize_name(s: &str) -> String {
     let s = s.trim();
     let s = s.strip_prefix(r"\\?\").unwrap_or(s);
     let s = s.strip_prefix(r"\\.\").unwrap_or(s);
-    let s = s
-        .strip_prefix("/dev/r")
-        .unwrap_or(s.strip_prefix("/dev/").unwrap_or(s));
-    s.trim_end_matches('/').to_string()
+    let s = s.strip_prefix("/dev/").unwrap_or(s);
+    let s = s.trim_end_matches('/');
+    macos_raw_disk_name(s).to_string()
+}
+
+/// On macOS, `/dev/rdiskN` is the raw node for `/dev/diskN` (and the same
+/// for partitions like `rdisk0s2`). Treat them as the same confirmation name.
+fn macos_raw_disk_name(s: &str) -> &str {
+    let Some(rest) = s.strip_prefix('r') else {
+        return s;
+    };
+    if !rest.starts_with("disk") || rest.len() <= 4 {
+        return s;
+    }
+    let tail = &rest[4..];
+    let bytes = tail.as_bytes();
+    if !bytes[0].is_ascii_digit() {
+        return s;
+    }
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    while i < bytes.len() {
+        if bytes[i] != b's' {
+            return s;
+        }
+        i += 1;
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == start {
+            return s;
+        }
+    }
+    rest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_rdisk_matches_disk() {
+        assert!(confirmation_matches("disk0", "disk0"));
+        assert!(confirmation_matches("disk0", "/dev/disk0"));
+        assert!(confirmation_matches("disk0", "rdisk0"));
+        assert!(confirmation_matches("disk0", "/dev/rdisk0"));
+        assert!(confirmation_matches("/dev/rdisk0", "disk0"));
+        assert!(confirmation_matches("/dev/rdisk0", "rdisk0"));
+        assert!(confirmation_matches("disk0s2", "/dev/rdisk0s2"));
+        assert!(confirmation_matches("/dev/rdisk0s2", "disk0s2"));
+        assert!(confirmation_matches("/dev/rdisk1s1s2", "disk1s1s2"));
+        assert!(!confirmation_matches("disk0", "disk1"));
+        assert!(!confirmation_matches("/dev/rdisk0", "disk1"));
+        // Do not treat arbitrary r-prefixed names as raw disk nodes.
+        assert!(!confirmation_matches("diskfoo", "rdiskfoo"));
+        assert!(confirmation_matches("sdb", "/dev/sdb"));
+        assert!(!confirmation_matches("sdb", "/dev/rsdb"));
+    }
+
+    #[test]
+    fn confirmation_accepts_unicode_and_long_names() {
+        let name = "café-文档-äé.txt";
+        assert!(confirmation_matches(name, name));
+        assert!(confirmation_matches(name, " café-文档-äé.txt "));
+        assert!(!confirmation_matches(name, "cafe-文档-äé.txt"));
+        let long = format!("wiped-target-{}-end", "あ".repeat(80));
+        assert!(confirmation_matches(&long, &long));
+        assert!(!confirmation_matches(&long, &format!("{long}-x")));
+    }
 }

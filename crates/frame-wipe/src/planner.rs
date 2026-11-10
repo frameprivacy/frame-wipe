@@ -19,6 +19,18 @@ pub enum Scope {
     FirmwareSanitize,
 }
 
+impl Scope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::WholeDevice => "whole device",
+            Self::Partition => "partition",
+            Self::FreeSpace => "free space",
+            Self::Files => "files",
+            Self::FirmwareSanitize => "firmware sanitize",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MediaKind {

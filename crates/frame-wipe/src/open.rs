@@ -167,18 +167,10 @@ fn unix_open(path: &Path, rw: bool, direct: bool) -> Result<File, Error> {
     let fd = unsafe { libc::open(c.as_ptr(), flags, 0o600) };
     if fd < 0 {
         let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::EACCES) || err.raw_os_error() == Some(libc::EPERM) {
-            if !crate::device::is_elevated() && crate::safety::path_looks_like_raw_device(path) {
-                return Err(Error::NeedsElevation(path.to_path_buf()));
-            }
-        }
         if err.raw_os_error() == Some(libc::ELOOP) {
             return Err(Error::Symlink(path.to_path_buf()));
         }
-        return Err(Error::Open {
-            path: path.to_path_buf(),
-            detail: err.to_string(),
-        });
+        return Err(map_open_error(path, err));
     }
     #[cfg(target_os = "macos")]
     if direct {
@@ -224,21 +216,37 @@ fn windows_open(path: &Path, rw: bool, direct: bool) -> Result<File, Error> {
     if h == INVALID_HANDLE_VALUE {
         let code = unsafe { GetLastError() } as i32;
         let err = std::io::Error::from_raw_os_error(code);
-        // ERROR_ACCESS_DENIED = 5, ERROR_PRIVILEGE_NOT_HELD = 1314
-        if matches!(code, 5 | 1314) && !crate::device::is_elevated() {
-            return Err(Error::NeedsElevation(path.to_path_buf()));
-        }
         // ERROR_CANT_ACCESS_FILE / reparse
         if matches!(code, 1920 | 4390 | 4393) {
             return Err(Error::Symlink(path.to_path_buf()));
         }
-        return Err(Error::Open {
-            path: path.to_path_buf(),
-            detail: err.to_string(),
-        });
+        return Err(map_open_error(path, err));
     }
     // Refuse if the handle is a reparse point we should not follow.
     Ok(File::from(unsafe { OwnedHandle::from_raw_handle(h as _) }))
+}
+
+fn map_open_error(path: &Path, err: std::io::Error) -> Error {
+    let permission = err.kind() == std::io::ErrorKind::PermissionDenied
+        || matches!(
+            err.raw_os_error(),
+            Some(13) | Some(1) | Some(5) | Some(1314)
+        );
+    if permission
+        && !crate::device::is_elevated()
+        && crate::safety::path_looks_like_raw_device(path)
+    {
+        return Error::NeedsElevation(path.to_path_buf());
+    }
+    let detail = if permission {
+        format!("permission denied (the file is not writable): {err}")
+    } else {
+        err.to_string()
+    };
+    Error::Open {
+        path: path.to_path_buf(),
+        detail,
+    }
 }
 
 fn lock_exclusive(file: &File, path: &Path) -> Result<(), Error> {

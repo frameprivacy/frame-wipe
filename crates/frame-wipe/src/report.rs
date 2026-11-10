@@ -1,7 +1,7 @@
 //! Completion report (JSON and plain text). Not a certification.
 
 use crate::planner::Plan;
-use crate::units::{format_bytes, format_throughput};
+use crate::units::{format_bytes, format_eta, format_throughput};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -60,7 +60,7 @@ impl Report {
         s.push_str(&format!("Started:     {}\n", self.started_utc));
         s.push_str(&format!("Finished:    {}\n", self.finished_utc));
         if let Some(ms) = self.elapsed_ms {
-            s.push_str(&format!("Elapsed:     {:.3} s\n", ms as f64 / 1000.0));
+            s.push_str(&format!("Elapsed:     {}\n", format_elapsed_ms(ms)));
             if ms > 0 && self.bytes_written > 0 {
                 let bps = self.bytes_written.saturating_mul(1000) / ms.max(1);
                 s.push_str(&format!("Throughput:  {}\n", format_throughput(bps)));
@@ -152,7 +152,7 @@ pub fn from_plan(
         serial: plan.identity.serial.clone(),
         size: plan.size,
         method: plan.method.label(),
-        scope: format!("{:?}", plan.scope).to_ascii_lowercase(),
+        scope: plan.scope.label().to_string(),
         bytes_written,
         verified,
         outcome,
@@ -214,4 +214,58 @@ pub fn write_report_files(
     tf.write_all(report.to_text().as_bytes())?;
     tf.sync_all()?;
     Ok(())
+}
+
+pub fn format_elapsed_ms(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{ms} ms")
+    } else {
+        format_eta(ms / 1000)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::planner::Scope;
+
+    #[test]
+    fn scope_label_is_readable() {
+        assert_eq!(Scope::WholeDevice.label(), "whole device");
+        assert_eq!(Scope::FreeSpace.label(), "free space");
+        assert_ne!(Scope::WholeDevice.label(), "wholedevice");
+    }
+
+    #[test]
+    fn elapsed_uses_a_human_duration() {
+        assert_eq!(format_elapsed_ms(0), "0 ms");
+        assert_eq!(format_elapsed_ms(250), "250 ms");
+        assert_eq!(format_elapsed_ms(2_292_000), "38m 12s");
+        let r = Report {
+            tool: "framewipe".into(),
+            version: "0".into(),
+            started_utc: "t".into(),
+            finished_utc: "t".into(),
+            elapsed_ms: Some(2_292_000),
+            target_path: "/dev/sdb".into(),
+            display_name: "sdb".into(),
+            model: None,
+            serial: None,
+            size: 100,
+            method: "zeros".into(),
+            scope: Scope::WholeDevice.label().into(),
+            bytes_written: 100,
+            verified: true,
+            outcome: Outcome::Success,
+            host: "test".into(),
+            bad_sectors: vec![],
+            warnings: vec![],
+            notes: vec![],
+        };
+        let text = r.to_text();
+        assert!(text.contains("Elapsed:     38m 12s"), "{text}");
+        assert!(text.contains("Scope:       whole device"), "{text}");
+        assert!(!text.contains("wholedevice"), "{text}");
+        assert!(!text.contains("2292.000 s"), "{text}");
+    }
 }

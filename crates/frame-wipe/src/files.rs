@@ -144,3 +144,51 @@ fn file_dev(path: &std::path::Path, _meta: &std::fs::Metadata) -> u64 {
 fn file_dev(_path: &std::path::Path, _meta: &std::fs::Metadata) -> u64 {
     0
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::method::Method;
+    use crate::safety::SafetyFlags;
+    use std::os::unix::io::AsRawFd;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn refuses_locked_file_and_leaves_content() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("FRAME_WIPE_TEST_DIR", dir.path());
+        let path = dir.path().join("locked.txt");
+        let original = b"keep-me-please!!!";
+        fs::write(&path, original).unwrap();
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let rc = unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_eq!(rc, 0, "failed to lock test file");
+        let flags = SafetyFlags {
+            explicit_target: true,
+            assume_yes: true,
+            typed_confirm: Some("locked.txt".into()),
+            countdown_secs: 0,
+            ..SafetyFlags::default()
+        };
+        let err = wipe_tree(
+            &path,
+            Method::zeros(),
+            None,
+            flags,
+            &Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(err.guard(), Some(Guard::InUse), "{err}");
+        assert_eq!(fs::read(&path).unwrap(), original);
+        drop(holder);
+    }
+}

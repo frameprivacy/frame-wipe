@@ -47,14 +47,37 @@ impl Journal {
     }
 }
 
+/// Conservative NAME_MAX used so journal sidecars and their `.journal.tmp`
+/// siblings stay creatable on common filesystems.
+const MAX_FILE_NAME_BYTES: usize = 255;
+
 pub fn journal_path_for(target: &Path) -> PathBuf {
     let file_name = target
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "target".into());
     let mut p = target.to_path_buf();
-    p.set_file_name(format!(".{file_name}.frame-wipe-journal"));
+    let pretty = format!(".{file_name}.frame-wipe-journal");
+    if pretty.len() <= MAX_FILE_NAME_BYTES {
+        p.set_file_name(pretty);
+        return p;
+    }
+    // A long target name would push the sidecar (or its temp rename) past
+    // NAME_MAX. Use a short, stable hash of the path instead.
+    let digest = fnv1a64(target.to_string_lossy().as_bytes());
+    p.set_file_name(format!(".frame-wipe-{digest:016x}.journal"));
     p
+}
+
+fn fnv1a64(data: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET;
+    for b in data {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 pub fn read(path: &Path) -> Result<Option<Journal>, Error> {
@@ -129,5 +152,50 @@ pub fn load_for_resume(path: &Path, expected: &DeviceIdentity) -> Result<Option<
             }
             Ok(Some(j))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn short_names_keep_a_readable_sidecar() {
+        let p = journal_path_for(Path::new("/tmp/doc.txt"));
+        assert_eq!(p, PathBuf::from("/tmp/.doc.txt.frame-wipe-journal"));
+    }
+
+    #[test]
+    fn long_unicode_names_fit_name_max() {
+        let long = format!("wiped-{}-end.bin", "あ".repeat(80));
+        let target = PathBuf::from("/tmp").join(&long);
+        assert!(
+            long.len() + ".x".len() <= 255 || long.len() > 200,
+            "test fixture should be a long utf-8 name, got {} bytes",
+            long.len()
+        );
+        let pretty = format!(".{long}.frame-wipe-journal");
+        assert!(
+            pretty.len() > MAX_FILE_NAME_BYTES,
+            "fixture should overflow NAME_MAX, got {}",
+            pretty.len()
+        );
+        let journal = journal_path_for(&target);
+        let name = journal.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.len() <= MAX_FILE_NAME_BYTES,
+            "journal name too long: {name} ({} bytes)",
+            name.len()
+        );
+        let tmp = journal.with_extension("journal.tmp");
+        let tmp_name = tmp.file_name().unwrap().to_string_lossy();
+        assert!(
+            tmp_name.len() <= MAX_FILE_NAME_BYTES,
+            "journal temp name too long: {tmp_name} ({} bytes)",
+            tmp_name.len()
+        );
+        assert_eq!(journal_path_for(&target), journal);
+        assert!(name.starts_with(".frame-wipe-") && name.ends_with(".journal"));
     }
 }
