@@ -145,8 +145,24 @@ fn normalize_name(s: &str) -> String {
     let s = s.strip_prefix(r"\\?\").unwrap_or(s);
     let s = s.strip_prefix(r"\\.\").unwrap_or(s);
     let s = s.strip_prefix("/dev/").unwrap_or(s);
-    let s = s.trim_end_matches('/');
+    let s = trim_trailing_separators(s);
     macos_raw_disk_name(s).to_string()
+}
+
+/// Trim trailing slashes or backslashes, but keep a root path (`/` or `\`)
+/// so confirming `/` can succeed.
+fn trim_trailing_separators(s: &str) -> &str {
+    let trimmed = s.trim_end_matches(['/', '\\']);
+    if !trimmed.is_empty() {
+        return trimmed;
+    }
+    if s.contains('/') {
+        "/"
+    } else if s.contains('\\') {
+        "\\"
+    } else {
+        s
+    }
 }
 
 /// On macOS, `/dev/rdiskN` is the raw node for `/dev/diskN` (and the same
@@ -204,6 +220,11 @@ mod tests {
         assert!(!confirmation_matches("diskfoo", "rdiskfoo"));
         assert!(confirmation_matches("sdb", "/dev/sdb"));
         assert!(!confirmation_matches("sdb", "/dev/rsdb"));
+        assert!(confirmation_matches("/", "/"));
+        assert!(confirmation_matches("/", " / "));
+        assert!(confirmation_matches("/dev/sdb/", "sdb"));
+        assert!(confirmation_matches(r"C:\", r"C:\"));
+        assert!(confirmation_matches(r"C:\", "C:"));
     }
 
     #[test]

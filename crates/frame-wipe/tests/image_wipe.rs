@@ -293,23 +293,14 @@ fn system_volume_directory_is_flagged_and_free_space_is_refused() {
         snap.is_system,
         "the directory that holds the OS must be flagged as the system volume so free-space mode requires --allow-system-disk"
     );
-    // confirmation_matches currently rejects a display name of "/", so the
-    // planner is exercised with a confirmable copy of the same snapshot.
-    let mut plan_snap = snap.clone();
-    if !frame_wipe::identity::confirmation_matches(
-        &plan_snap.identity.display_name,
-        &plan_snap.identity.display_name,
-    ) {
-        plan_snap.identity.display_name = "system-root".into();
-    }
     let flags = SafetyFlags {
         explicit_target: true,
         assume_yes: true,
-        typed_confirm: Some(plan_snap.identity.display_name.clone()),
+        typed_confirm: Some(snap.identity.display_name.clone()),
         countdown_secs: 0,
         ..SafetyFlags::default()
     };
-    let err = plan(&plan_snap, Scope::FreeSpace, Method::zeros(), None, &flags).unwrap_err();
+    let err = plan(&snap, Scope::FreeSpace, Method::zeros(), None, &flags).unwrap_err();
     assert_eq!(err.guard(), Some(Guard::SystemDisk), "got {err}");
 }
 
