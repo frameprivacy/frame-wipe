@@ -147,9 +147,21 @@ fn refuses_read_only_file_and_leaves_content() {
         "{err}"
     );
     assert_eq!(fs::read(&path).unwrap(), original);
-    let mut perms = fs::metadata(&path).unwrap().permissions();
-    perms.set_readonly(false);
-    fs::set_permissions(&path, perms).unwrap();
+    // tempfile cleanup needs the file writable. Avoid set_readonly(false)
+    // on Unix, where it makes the file world-writable and trips clippy.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&path, perms).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(&path, perms).unwrap();
+    }
 }
 
 #[test]

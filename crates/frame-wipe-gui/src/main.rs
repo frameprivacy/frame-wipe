@@ -567,7 +567,7 @@ impl App {
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let t_refresh = self.t("ui.refresh");
-                            if text_btn(ui, t_refresh).clicked() && !self.running {
+                            if text_btn_enabled(ui, t_refresh, !self.running).clicked() {
                                 self.refresh();
                             }
                             ui.add_space(GRID);
@@ -671,23 +671,19 @@ impl App {
             });
             ui.add_space(GRID);
             if self.list_error.is_some() {
-                theme::card_frame().show(ui, |ui| {
-                    ui.label(
-                        RichText::new(self.t("ui.failed"))
-                            .font(FontId::new(FONT_BODY, theme::semibold()))
-                            .color(theme::CRITICAL),
-                    );
-                });
+                ui.label(
+                    RichText::new(self.t("ui.failed"))
+                        .font(FontId::new(FONT_SMALL, theme::medium()))
+                        .color(theme::CRITICAL),
+                );
                 return;
             }
             if self.devices.is_empty() {
-                theme::card_frame().show(ui, |ui| {
-                    ui.label(
-                        RichText::new(self.t("ui.empty_title"))
-                            .color(theme::STEEL_200)
-                            .size(FONT_BODY),
-                    );
-                });
+                ui.label(
+                    RichText::new(self.t("ui.empty_title"))
+                        .color(theme::STEEL_400)
+                        .size(FONT_SMALL),
+                );
                 return;
             }
             egui::ScrollArea::vertical()
@@ -841,9 +837,8 @@ impl App {
     fn detail_overview(&self, ui: &mut Ui, h: f32) {
         let w = ui.available_width();
         ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
+            ui.set_max_height(h);
             let total = self.devices.len();
             let open = self.selectable_indices().len();
             let protected = total.saturating_sub(open);
@@ -1023,158 +1018,141 @@ impl App {
         let blocked = protection(&snap).is_some();
         let w = ui.available_width();
         let modal_open = matches!(self.screen, Screen::Confirm | Screen::Countdown);
-        let footer_h = if modal_open { 0.0 } else { GRID * 8.0 };
-        let body_h = (h - footer_h).max(120.0);
         let two_col = w >= 560.0;
 
         ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
-            ui.allocate_ui(Vec2::new(w, body_h), |ui| {
-                ui.set_width(w);
-                ui.set_max_height(body_h);
-                ui.label(
-                    RichText::new(&model)
-                        .font(FontId::new(FONT_TITLE, theme::semibold()))
-                        .color(theme::TEXT),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "{}  ·  {}  ·  {}",
-                        snap.identity.display_name,
-                        snap.kind.label(),
-                        format_bytes(snap.identity.size)
-                    ))
-                    .color(theme::STEEL_200)
-                    .size(FONT_BODY),
-                );
-                ui.add_space(GRID);
-                if mounted && self.scope == ScopeKind::Whole {
+            ui.set_max_height(h);
+            egui::ScrollArea::vertical()
+                .id_salt("detail-selected")
+                .auto_shrink([false, true])
+                .max_height(h)
+                .show(ui, |ui| {
+                    ui.set_width(w);
                     ui.label(
-                        RichText::new(self.t("ui.mounted_hint"))
-                            .color(theme::WARNING)
-                            .size(FONT_BODY),
+                        RichText::new(&model)
+                            .font(FontId::new(FONT_TITLE, theme::semibold()))
+                            .color(theme::TEXT),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{}  ·  {}  ·  {}",
+                            snap.identity.display_name,
+                            snap.kind.label(),
+                            format_bytes(snap.identity.size)
+                        ))
+                        .color(theme::STEEL_200)
+                        .size(FONT_BODY),
                     );
                     ui.add_space(GRID);
-                }
-                let size_txt = format_bytes(snap.identity.size);
-                let size_bytes = format!("{} bytes", snap.identity.size);
-                let path_txt = snap.identity.path.display().to_string();
-                let type_txt = snap.kind.label().to_string();
-                let mut facts: Vec<(&str, &str, Option<&str>)> = vec![
-                    (t_serial, serial.as_str(), None),
-                    (t_path, path_txt.as_str(), None),
-                    (t_size, size_txt.as_str(), Some(size_bytes.as_str())),
-                    (t_type, type_txt.as_str(), None),
-                ];
-                let mounts_txt = snap.mounts.join(", ");
-                if mounted {
-                    facts.push((t_mounted, mounts_txt.as_str(), None));
-                }
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height(ui.available_height())
-                    .show(ui, |ui| {
-                        ui.set_width(w);
-                        fill_card(ui, w, 0.0, |ui| fact_strip(ui, &facts, two_col));
-                        ui.add_space(GRID * 2.0);
-                        let est = rough_estimate(snap.identity.size, self.method, self.verify);
-                        let choices = |ui: &mut Ui| {
-                            ui.label(
-                                RichText::new(t_scope)
-                                    .font(FontId::new(FONT_SMALL, theme::medium()))
-                                    .color(theme::STEEL_400),
-                            );
-                            ui.horizontal(|ui| {
-                                scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
-                                scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
-                            });
-                            ui.add_space(GRID);
-                            ui.label(
-                                RichText::new(t_method)
-                                    .font(FontId::new(FONT_SMALL, theme::medium()))
-                                    .color(theme::STEEL_400),
-                            );
-                            ui.horizontal(|ui| {
-                                method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
-                                method_choice(ui, &mut self.method, MethodKind::Random, t_random);
-                                method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
-                            });
-                            ui.add_space(GRID);
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.verify, t_verify);
-                                ui.add_space(GRID * 2.0);
-                                ui.checkbox(&mut self.dry_run, t_dry);
-                            });
-                        };
-                        let estimate = |ui: &mut Ui| {
-                            ui.label(
-                                RichText::new(t_est)
-                                    .font(FontId::new(FONT_SMALL, theme::medium()))
-                                    .color(theme::STEEL_400),
-                            );
-                            ui.label(
-                                RichText::new(&est)
-                                    .font(FontId::new(FONT_TITLE, theme::semibold()))
-                                    .color(theme::TEXT),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(t_est_note)
-                                        .color(theme::STEEL_400)
-                                        .size(FONT_SMALL),
-                                )
-                                .wrap(),
-                            );
-                        };
-                        if two_col {
-                            let gap = GRID * 2.0;
-                            let left_w = ((w - gap) * 0.6).floor();
-                            let right_w = w - gap - left_w;
-                            ui.horizontal_top(|ui| {
-                                ui.spacing_mut().item_spacing.x = gap;
-                                ui.allocate_ui(Vec2::new(left_w, 0.0), |ui| {
-                                    fill_card(ui, left_w, 0.0, choices);
-                                });
-                                ui.allocate_ui(Vec2::new(right_w, 0.0), |ui| {
-                                    fill_card(ui, right_w, 0.0, estimate);
-                                });
-                            });
-                        } else {
-                            fill_card(ui, w, 0.0, choices);
+                    if mounted && self.scope == ScopeKind::Whole {
+                        ui.label(
+                            RichText::new(self.t("ui.mounted_hint"))
+                                .color(theme::WARNING)
+                                .size(FONT_BODY),
+                        );
+                        ui.add_space(GRID);
+                    }
+                    let size_txt = format_bytes(snap.identity.size);
+                    let size_bytes = format!("{} bytes", snap.identity.size);
+                    let path_txt = snap.identity.path.display().to_string();
+                    let type_txt = snap.kind.label().to_string();
+                    let mut facts: Vec<(&str, &str, Option<&str>)> = vec![
+                        (t_serial, serial.as_str(), None),
+                        (t_path, path_txt.as_str(), None),
+                        (t_size, size_txt.as_str(), Some(size_bytes.as_str())),
+                        (t_type, type_txt.as_str(), None),
+                    ];
+                    let mounts_txt = snap.mounts.join(", ");
+                    if mounted {
+                        facts.push((t_mounted, mounts_txt.as_str(), None));
+                    }
+                    fill_card(ui, w, 0.0, |ui| fact_strip(ui, &facts, two_col));
+                    ui.add_space(GRID * 2.0);
+                    let est = rough_estimate(snap.identity.size, self.method, self.verify);
+                    let choices = |ui: &mut Ui| {
+                        ui.label(
+                            RichText::new(t_scope)
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(theme::STEEL_400),
+                        );
+                        ui.horizontal(|ui| {
+                            scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
+                            scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
+                        });
+                        ui.add_space(GRID);
+                        ui.label(
+                            RichText::new(t_method)
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(theme::STEEL_400),
+                        );
+                        ui.horizontal(|ui| {
+                            method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
+                            method_choice(ui, &mut self.method, MethodKind::Random, t_random);
+                            method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
+                        });
+                        ui.add_space(GRID);
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.verify, t_verify);
                             ui.add_space(GRID * 2.0);
-                            fill_card(ui, w, 0.0, estimate);
-                        }
-                    });
-            });
-            if !modal_open {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(w, footer_h),
-                    Layout::bottom_up(Align::Min),
-                    |ui| {
-                        ui.set_width(w);
+                            ui.checkbox(&mut self.dry_run, t_dry);
+                        });
+                    };
+                    let estimate = |ui: &mut Ui| {
+                        ui.label(
+                            RichText::new(t_est)
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(theme::STEEL_400),
+                        );
+                        ui.label(
+                            RichText::new(&est)
+                                .font(FontId::new(FONT_TITLE, theme::semibold()))
+                                .color(theme::TEXT),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t_est_note)
+                                    .color(theme::STEEL_400)
+                                    .size(FONT_SMALL),
+                            )
+                            .wrap(),
+                        );
+                    };
+                    if two_col {
+                        let gap = GRID * 2.0;
+                        let left_w = ((w - gap) * 0.6).floor();
+                        let right_w = w - gap - left_w;
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            ui.allocate_ui(Vec2::new(left_w, 0.0), |ui| {
+                                fill_card(ui, left_w, 0.0, choices);
+                            });
+                            ui.allocate_ui(Vec2::new(right_w, 0.0), |ui| {
+                                fill_card(ui, right_w, 0.0, estimate);
+                            });
+                        });
+                    } else {
+                        fill_card(ui, w, 0.0, choices);
+                        ui.add_space(GRID * 2.0);
+                        fill_card(ui, w, 0.0, estimate);
+                    }
+                    if !modal_open {
                         let enabled = !blocked
                             && !self.running
                             && !(mounted && self.scope == ScopeKind::Whole);
-                        let btn = danger_button_width(ui, t_over, enabled, w);
-                        if btn.clicked() {
-                            self.try_open_confirm();
-                        }
-                        if let Some(err) = &self.error {
-                            ui.add_space(GRID);
-                            ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
-                        }
-                        ui.add_space(GRID);
-                        let r = ui.max_rect();
-                        ui.painter().hline(
-                            r.x_range(),
-                            r.top() + 0.5,
-                            Stroke::new(1.0_f32, theme::BORDER),
-                        );
-                    },
-                );
-            }
+                        let err = self.error.clone();
+                        action_footer(ui, w, |ui| {
+                            let btn = danger_button_width(ui, t_over, enabled, w);
+                            if btn.clicked() {
+                                self.try_open_confirm();
+                            }
+                            if let Some(err) = err {
+                                ui.add_space(GRID);
+                                ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
+                            }
+                        });
+                    }
+                });
         });
     }
 
@@ -1194,101 +1172,96 @@ impl App {
             .map(|p| self.t(phase_key(p.phase)))
             .unwrap_or_else(|| self.t("ui.working"));
         let w = ui.available_width();
-        let footer_h = GRID * 8.0;
         ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
-            ui.label(
-                RichText::new(&title)
-                    .font(FontId::new(FONT_TITLE, theme::semibold()))
-                    .color(theme::TEXT),
-            );
-            let meta = if subtitle.is_empty() {
-                phase_label.to_string()
-            } else {
-                format!("{phase_label}  ·  {subtitle}")
-            };
-            ui.label(RichText::new(meta).color(theme::STEEL_200).size(FONT_BODY));
-            ui.add_space(GRID * 2.0);
-            if let Some(p) = &self.progress {
-                let frac = p.fraction() as f32;
-                let show_verify =
-                    self.verify || matches!(p.phase, Phase::Verifying | Phase::Syncing);
-                stage_rail(ui, p, show_verify, self.lang);
-                ui.add_space(GRID * 2.0);
-                ui.label(
-                    RichText::new(format!("{:.0}%", (frac * 100.0).clamp(0.0, 100.0)))
-                        .font(FontId::new(FONT_DISPLAY, theme::semibold()))
-                        .color(theme::TEXT),
-                );
-                ui.add_space(GRID);
-                wide_card(ui, |ui| {
-                    let bar_w = ui.available_width();
-                    let (bar_rect, _) =
-                        ui.allocate_exact_size(Vec2::new(bar_w, 10.0), Sense::hover());
-                    ui.painter()
-                        .rect_filled(bar_rect, CornerRadius::same(5), theme::STEEL_700);
-                    let mut fill_rect = bar_rect;
-                    let fill_w = bar_rect.width() * frac.clamp(0.0, 1.0);
-                    fill_rect.set_width(fill_w);
-                    if fill_w > 0.5 {
-                        ui.painter().rect_filled(
-                            fill_rect,
-                            CornerRadius::same(5),
-                            theme::STEEL_200,
-                        );
-                    }
-                    ui.add_space(GRID);
-                    let total = if p.bytes_total == 0 {
-                        format_bytes(p.bytes_done)
-                    } else {
-                        format!(
-                            "{} of {}",
-                            format_bytes(p.bytes_done),
-                            format_bytes(p.bytes_total)
-                        )
-                    };
-                    ui.label(RichText::new(total).size(FONT_BODY).color(theme::STEEL_200));
-                });
-                ui.add_space(GRID * 2.0);
-                let written = if p.bytes_total == 0 {
-                    format_bytes(p.bytes_done)
-                } else {
-                    format!(
-                        "{} / {}",
-                        format_bytes(p.bytes_done),
-                        format_bytes(p.bytes_total)
-                    )
-                };
-                let eta = p.eta_secs.map(format_eta).unwrap_or_else(|| "--".into());
-                let pass = format!("{}/{}", p.pass, p.passes);
-                let chips = [
-                    (self.t("ui.written"), written),
-                    (self.t("ui.throughput"), format_throughput(p.throughput_bps)),
-                    (self.t("ui.eta"), eta),
-                    (self.t("ui.pass"), pass),
-                ];
-                metric_row(ui, w, &chips);
-            }
-            ui.add_space((ui.available_height() - footer_h).max(GRID));
-            ui.allocate_ui_with_layout(
-                Vec2::new(w, footer_h),
-                Layout::bottom_up(Align::Min),
-                |ui| {
+            ui.set_max_height(h);
+            egui::ScrollArea::vertical()
+                .id_salt("progress-view")
+                .auto_shrink([false, true])
+                .max_height(h)
+                .show(ui, |ui| {
                     ui.set_width(w);
-                    if footer_btn(ui, t_cancel).clicked() {
-                        self.cancel.store(true, Ordering::SeqCst);
-                    }
-                    ui.add_space(GRID);
-                    let r = ui.max_rect();
-                    ui.painter().hline(
-                        r.x_range(),
-                        r.top() + 0.5,
-                        Stroke::new(1.0_f32, theme::BORDER),
+                    ui.label(
+                        RichText::new(&title)
+                            .font(FontId::new(FONT_TITLE, theme::semibold()))
+                            .color(theme::TEXT),
                     );
-                },
-            );
+                    let meta = if subtitle.is_empty() {
+                        phase_label.to_string()
+                    } else {
+                        format!("{phase_label}  ·  {subtitle}")
+                    };
+                    ui.label(RichText::new(meta).color(theme::STEEL_200).size(FONT_BODY));
+                    ui.add_space(GRID * 2.0);
+                    if let Some(p) = &self.progress {
+                        let frac = p.fraction() as f32;
+                        let show_verify =
+                            self.verify || matches!(p.phase, Phase::Verifying | Phase::Syncing);
+                        stage_rail(ui, p, show_verify, self.lang);
+                        ui.add_space(GRID * 2.0);
+                        ui.label(
+                            RichText::new(format!("{:.0}%", (frac * 100.0).clamp(0.0, 100.0)))
+                                .font(FontId::new(FONT_DISPLAY, theme::semibold()))
+                                .color(theme::TEXT),
+                        );
+                        ui.add_space(GRID);
+                        wide_card(ui, |ui| {
+                            let bar_w = ui.available_width();
+                            let (bar_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(bar_w, 10.0), Sense::hover());
+                            ui.painter().rect_filled(
+                                bar_rect,
+                                CornerRadius::same(5),
+                                theme::STEEL_700,
+                            );
+                            let mut fill_rect = bar_rect;
+                            let fill_w = bar_rect.width() * frac.clamp(0.0, 1.0);
+                            fill_rect.set_width(fill_w);
+                            if fill_w > 0.5 {
+                                ui.painter().rect_filled(
+                                    fill_rect,
+                                    CornerRadius::same(5),
+                                    theme::STEEL_200,
+                                );
+                            }
+                            ui.add_space(GRID);
+                            let total = if p.bytes_total == 0 {
+                                format_bytes(p.bytes_done)
+                            } else {
+                                format!(
+                                    "{} of {}",
+                                    format_bytes(p.bytes_done),
+                                    format_bytes(p.bytes_total)
+                                )
+                            };
+                            ui.label(RichText::new(total).size(FONT_BODY).color(theme::STEEL_200));
+                        });
+                        ui.add_space(GRID * 2.0);
+                        let written = if p.bytes_total == 0 {
+                            format_bytes(p.bytes_done)
+                        } else {
+                            format!(
+                                "{} / {}",
+                                format_bytes(p.bytes_done),
+                                format_bytes(p.bytes_total)
+                            )
+                        };
+                        let eta = p.eta_secs.map(format_eta).unwrap_or_else(|| "--".into());
+                        let pass = format!("{}/{}", p.pass, p.passes);
+                        let chips = [
+                            (self.t("ui.written"), written),
+                            (self.t("ui.throughput"), format_throughput(p.throughput_bps)),
+                            (self.t("ui.eta"), eta),
+                            (self.t("ui.pass"), pass),
+                        ];
+                        metric_row(ui, w, &chips);
+                    }
+                    action_footer(ui, w, |ui| {
+                        if footer_btn(ui, t_cancel).clicked() {
+                            self.cancel.store(true, Ordering::SeqCst);
+                        }
+                    });
+                });
         });
     }
 
@@ -1296,176 +1269,167 @@ impl App {
         let t_back = self.t("ui.back");
         let Some(r) = self.report.clone() else { return };
         let w = ui.available_width();
-        let footer_h = GRID * 8.0;
         let failed = r.outcome == Outcome::Failed;
         let title = match r.outcome {
             Outcome::Success | Outcome::DryRun => self.t("ui.report_title"),
             Outcome::Cancelled => self.t("ui.cancel"),
             Outcome::Failed => self.t("ui.failed"),
         };
-        let title_color = if failed { theme::CRITICAL } else { theme::TEXT };
+        let title_color = match r.outcome {
+            Outcome::Failed => theme::CRITICAL,
+            Outcome::Cancelled => theme::WARNING,
+            Outcome::Success | Outcome::DryRun => theme::RESOLVED,
+        };
         ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
-            ui.label(
-                RichText::new(title)
-                    .font(FontId::new(FONT_TITLE, theme::semibold()))
-                    .color(title_color),
-            );
-            ui.label(
-                RichText::new(format!("{}  ·  {}", r.display_name, r.target_path))
-                    .color(theme::STEEL_200)
-                    .size(FONT_BODY),
-            );
-            ui.add_space(GRID * 2.0);
-            let elapsed = r
-                .elapsed_ms
-                .map(format_elapsed_ms)
-                .unwrap_or_else(|| "--".into());
-            let written = format_bytes(r.bytes_written);
-            let verified = if r.verified {
-                self.t("ui.verified")
-            } else {
-                self.t("ui.not_verified")
-            };
-            let chips = [
-                (self.t("ui.elapsed"), elapsed),
-                (self.t("ui.written"), written),
-                (self.t("ui.scope"), r.scope.clone()),
-                (self.t("ui.method"), r.method.clone()),
-                (self.t("ui.stage.verify"), verified.to_string()),
-            ];
-            metric_row(ui, w, &chips);
-            ui.add_space(GRID * 2.0);
-            if !r.notes.is_empty() {
-                let bg = if failed {
-                    theme::CRITICAL_BG
-                } else {
-                    theme::SURFACE
-                };
-                egui::Frame::new()
-                    .fill(bg)
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if failed { theme::DANGER } else { theme::BORDER },
-                    ))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_width((w - 26.0).max(0.0));
-                        ui.label(
-                            RichText::new(self.t("ui.notes"))
-                                .font(FontId::new(FONT_SMALL, theme::medium()))
-                                .color(if failed {
-                                    theme::CRITICAL
-                                } else {
-                                    theme::STEEL_400
-                                }),
-                        );
-                        for n in &r.notes {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(n).color(theme::TEXT).size(FONT_BODY),
-                                )
-                                .wrap(),
-                            );
-                        }
-                    });
-                ui.add_space(GRID);
-            }
-            if !r.warnings.is_empty() {
-                egui::Frame::new()
-                    .fill(theme::WARNING_BG)
-                    .stroke(Stroke::new(1.0_f32, theme::WARNING))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_width((w - 26.0).max(0.0));
-                        ui.label(
-                            RichText::new(self.t("ui.warnings"))
-                                .font(FontId::new(FONT_SMALL, theme::medium()))
-                                .color(theme::WARNING),
-                        );
-                        for n in &r.warnings {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(n).color(theme::STEEL_200).size(FONT_BODY),
-                                )
-                                .wrap(),
-                            );
-                        }
-                    });
-                ui.add_space(GRID);
-            }
-            ui.add_space((ui.available_height() - footer_h).max(GRID));
-            ui.allocate_ui_with_layout(
-                Vec2::new(w, footer_h),
-                Layout::bottom_up(Align::Min),
-                |ui| {
+            ui.set_max_height(h);
+            egui::ScrollArea::vertical()
+                .id_salt("report-view")
+                .auto_shrink([false, true])
+                .max_height(h)
+                .show(ui, |ui| {
                     ui.set_width(w);
-                    if footer_btn(ui, t_back).clicked() {
-                        self.screen = Screen::Main;
-                        self.report = None;
-                        self.progress = None;
-                    }
-                    ui.add_space(GRID);
-                    let rct = ui.max_rect();
-                    ui.painter().hline(
-                        rct.x_range(),
-                        rct.top() + 0.5,
-                        Stroke::new(1.0_f32, theme::BORDER),
+                    ui.label(
+                        RichText::new(title)
+                            .font(FontId::new(FONT_TITLE, theme::semibold()))
+                            .color(title_color),
                     );
-                },
-            );
+                    ui.label(
+                        RichText::new(format!("{}  ·  {}", r.display_name, r.target_path))
+                            .color(theme::STEEL_200)
+                            .size(FONT_BODY),
+                    );
+                    ui.add_space(GRID * 2.0);
+                    let elapsed = r
+                        .elapsed_ms
+                        .map(format_elapsed_ms)
+                        .unwrap_or_else(|| "--".into());
+                    let written = format_bytes(r.bytes_written);
+                    let verified = if r.verified {
+                        self.t("ui.verified")
+                    } else {
+                        self.t("ui.not_verified")
+                    };
+                    let chips = [
+                        (self.t("ui.elapsed"), elapsed),
+                        (self.t("ui.written"), written),
+                        (self.t("ui.scope"), r.scope.clone()),
+                        (self.t("ui.method"), r.method.clone()),
+                        (self.t("ui.stage.verify"), verified.to_string()),
+                    ];
+                    metric_row(ui, w, &chips);
+                    ui.add_space(GRID * 2.0);
+                    if !r.notes.is_empty() {
+                        let bg = if failed {
+                            theme::CRITICAL_BG
+                        } else {
+                            theme::SURFACE
+                        };
+                        egui::Frame::new()
+                            .fill(bg)
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if failed { theme::DANGER } else { theme::BORDER },
+                            ))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_width((w - 26.0).max(0.0));
+                                ui.label(
+                                    RichText::new(self.t("ui.notes"))
+                                        .font(FontId::new(FONT_SMALL, theme::medium()))
+                                        .color(if failed {
+                                            theme::CRITICAL
+                                        } else {
+                                            theme::STEEL_400
+                                        }),
+                                );
+                                for n in &r.notes {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(n).color(theme::TEXT).size(FONT_BODY),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                        ui.add_space(GRID);
+                    }
+                    if !r.warnings.is_empty() {
+                        egui::Frame::new()
+                            .fill(theme::WARNING_BG)
+                            .stroke(Stroke::new(1.0_f32, theme::WARNING))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_width((w - 26.0).max(0.0));
+                                ui.label(
+                                    RichText::new(self.t("ui.warnings"))
+                                        .font(FontId::new(FONT_SMALL, theme::medium()))
+                                        .color(theme::WARNING),
+                                );
+                                for n in &r.warnings {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(n)
+                                                .color(theme::STEEL_200)
+                                                .size(FONT_BODY),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                        ui.add_space(GRID);
+                    }
+                    action_footer(ui, w, |ui| {
+                        if footer_btn(ui, t_back).clicked() {
+                            self.screen = Screen::Main;
+                            self.report = None;
+                            self.progress = None;
+                        }
+                    });
+                });
         });
     }
 
     fn error_view(&mut self, ui: &mut Ui, h: f32) {
         let t_back = self.t("ui.back");
         let w = ui.available_width();
-        let footer_h = GRID * 8.0;
         let msg = self.error.clone().unwrap_or_default();
         ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
-            ui.label(
-                RichText::new(self.t("ui.failed"))
-                    .font(FontId::new(FONT_TITLE, theme::semibold()))
-                    .color(theme::CRITICAL),
-            );
-            ui.label(
-                RichText::new(self.t("ui.wipe_error"))
-                    .color(theme::STEEL_200)
-                    .size(FONT_BODY),
-            );
-            ui.add_space(GRID * 2.0);
-            fill_card(ui, w, 0.0, |ui| {
-                ui.add(
-                    egui::Label::new(RichText::new(msg).color(theme::TEXT).size(FONT_BODY)).wrap(),
-                );
-            });
-            ui.add_space((ui.available_height() - footer_h).max(GRID));
-            ui.allocate_ui_with_layout(
-                Vec2::new(w, footer_h),
-                Layout::bottom_up(Align::Min),
-                |ui| {
+            ui.set_max_height(h);
+            egui::ScrollArea::vertical()
+                .id_salt("error-view")
+                .auto_shrink([false, true])
+                .max_height(h)
+                .show(ui, |ui| {
                     ui.set_width(w);
-                    if footer_btn(ui, t_back).clicked() {
-                        self.screen = Screen::Main;
-                        self.error = None;
-                        self.progress = None;
-                    }
-                    ui.add_space(GRID);
-                    let r = ui.max_rect();
-                    ui.painter().hline(
-                        r.x_range(),
-                        r.top() + 0.5,
-                        Stroke::new(1.0_f32, theme::BORDER),
+                    ui.label(
+                        RichText::new(self.t("ui.failed"))
+                            .font(FontId::new(FONT_TITLE, theme::semibold()))
+                            .color(theme::CRITICAL),
                     );
-                },
-            );
+                    ui.label(
+                        RichText::new(self.t("ui.wipe_error"))
+                            .color(theme::STEEL_200)
+                            .size(FONT_BODY),
+                    );
+                    ui.add_space(GRID * 2.0);
+                    fill_card(ui, w, 0.0, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(msg).color(theme::TEXT).size(FONT_BODY))
+                                .wrap(),
+                        );
+                    });
+                    action_footer(ui, w, |ui| {
+                        if footer_btn(ui, t_back).clicked() {
+                            self.screen = Screen::Main;
+                            self.error = None;
+                            self.progress = None;
+                        }
+                    });
+                });
         });
     }
 
@@ -1863,7 +1827,7 @@ fn metric_row(ui: &mut Ui, w: f32, items: &[(&str, String)]) {
     let per_row = if w >= 640.0 {
         items.len().max(1)
     } else {
-        ((items.len() + 1) / 2).max(1)
+        items.len().div_ceil(2).max(1)
     };
     let per_row = per_row.min(items.len().max(1));
     for chunk in items.chunks(per_row) {
@@ -1964,13 +1928,38 @@ fn stat_row(ui: &mut Ui, w: f32, items: &[(String, &str, Color32)]) {
 }
 
 fn text_btn(ui: &mut Ui, label: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(RichText::new(label).color(theme::STEEL_50).size(FONT_BODY))
+    text_btn_enabled(ui, label, true)
+}
+
+fn text_btn_enabled(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
+    let color = if enabled {
+        theme::STEEL_50
+    } else {
+        theme::STEEL_400
+    };
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(RichText::new(label).color(color).size(FONT_BODY))
             .fill(theme::SURFACE_RAISED)
             .stroke(Stroke::new(1.0_f32, theme::BORDER))
             .corner_radius(CornerRadius::same(8))
             .min_size(Vec2::new(0.0, GRID * 4.0)),
     )
+}
+
+/// Divider and action control placed directly under the content, with a
+/// modest gap, instead of being pinned to the bottom of a tall window.
+fn action_footer(ui: &mut Ui, w: f32, add: impl FnOnce(&mut Ui)) {
+    ui.add_space(GRID * 3.0);
+    ui.set_width(w);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 1.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        Stroke::new(1.0_f32, theme::BORDER),
+    );
+    ui.add_space(GRID);
+    add(ui);
 }
 
 fn footer_btn(ui: &mut Ui, label: &str) -> egui::Response {
