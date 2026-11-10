@@ -147,8 +147,8 @@ fn refuses_read_only_file_and_leaves_content() {
         "{err}"
     );
     assert_eq!(fs::read(&path).unwrap(), original);
-    // tempfile cleanup needs the file writable. Avoid set_readonly(false)
-    // on Unix, where it makes the file world-writable and trips clippy.
+    // tempfile cleanup needs the file writable. On Unix, set_readonly(false)
+    // makes the file world-writable, so restore a normal mode instead.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -156,7 +156,10 @@ fn refuses_read_only_file_and_leaves_content() {
         perms.set_mode(0o644);
         fs::set_permissions(&path, perms).unwrap();
     }
+    // On Windows, clearing the readonly bit is the correct cleanup. The
+    // clippy lint is about Unix world-writable mode, which this is not.
     #[cfg(windows)]
+    #[allow(clippy::permissions_set_readonly_false)]
     {
         let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_readonly(false);
