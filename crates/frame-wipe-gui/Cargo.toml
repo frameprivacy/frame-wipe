@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 frame-wipe = { workspace = true }
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11"] }
@@ -24,6 +25,7 @@ egui = "0.31"
 [target.'cfg(target_os = "macos")'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
 egui = "0.31"
+objc = "0.2.7"
 
 # Windows hosted CI has no OpenGL 2.0 context. wgpu uses DirectX (including WARP)
 # so --smoke-test can launch a real window there.

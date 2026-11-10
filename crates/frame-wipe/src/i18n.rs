@@ -251,6 +251,12 @@ pub fn t(lang: Lang, key: &str) -> &'static str {
         (Lang::Fr, "ui.notes") => "Remarques",
         (Lang::En, "ui.warnings") => "Warnings",
         (Lang::Fr, "ui.warnings") => "Avertissements",
+        (Lang::En, "ui.hide_sidebar") => "Hide sidebar",
+        (Lang::Fr, "ui.hide_sidebar") => "Masquer la barre laterale",
+        (Lang::En, "ui.show_sidebar") => "Show sidebar",
+        (Lang::Fr, "ui.show_sidebar") => "Afficher la barre laterale",
+        (Lang::En, "ui.refreshing") => "Refreshing…",
+        (Lang::Fr, "ui.refreshing") => "Actualisation…",
         _ => "??",
     }
 }

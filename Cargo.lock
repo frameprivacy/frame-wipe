@@ -917,6 +917,8 @@ dependencies = [
  "eframe",
  "egui",
  "frame-wipe",
+ "objc",
+ "raw-window-handle",
 ]
 
 [[package]]
