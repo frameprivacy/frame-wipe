@@ -542,6 +542,8 @@ fn install_cancel() -> Arc<AtomicBool> {
     unsafe {
         libc::signal(libc::SIGINT, on_sigint as *const () as usize);
     }
+    #[cfg(windows)]
+    install_windows_cancel();
     flag
 }
 
@@ -555,6 +557,27 @@ extern "C" fn on_sigint(_: i32) {
     }
 }
 
+#[cfg(windows)]
+fn install_windows_cancel() {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    // TRUE means the handler stays registered. A failure is not fatal;
+    // cancel would then fall back to process termination.
+    let _ = unsafe { SetConsoleCtrlHandler(Some(on_console_ctrl), 1) };
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn on_console_ctrl(ctrl_type: u32) -> i32 {
+    // CTRL_C_EVENT = 0, CTRL_BREAK_EVENT = 1, CTRL_CLOSE_EVENT = 2.
+    if matches!(ctrl_type, 0 | 1 | 2) {
+        if let Some(f) = CANCEL_SLOT.get() {
+            f.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        // Non-zero: we handled it, so Windows should not terminate immediately.
+        return 1;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +586,12 @@ mod tests {
     fn help_does_not_panic() {
         let err = parse_from(["framewipe", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_ctrl_handler_can_be_installed() {
+        install_windows_cancel();
     }
 
     #[test]
