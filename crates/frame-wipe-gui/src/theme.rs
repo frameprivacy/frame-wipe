@@ -21,6 +21,8 @@ pub const STEEL_400: Color32 = Color32::from_rgb(140, 153, 180);
 pub const STEEL_700: Color32 = Color32::from_rgb(63, 79, 106);
 pub const CRITICAL: Color32 = Color32::from_rgb(207, 138, 130);
 pub const CRITICAL_BG: Color32 = Color32::from_rgb(48, 24, 22);
+pub const DANGER: Color32 = Color32::from_rgb(196, 54, 48);
+pub const DANGER_HOVER: Color32 = Color32::from_rgb(216, 70, 62);
 pub const WARNING: Color32 = Color32::from_rgb(200, 165, 113);
 pub const WARNING_BG: Color32 = Color32::from_rgb(42, 34, 18);
 pub const RESOLVED: Color32 = Color32::from_rgb(147, 181, 168);
@@ -32,6 +34,7 @@ pub const RADIUS: f32 = 8.0;
 pub const FONT_BODY: f32 = 14.5;
 pub const FONT_SMALL: f32 = 12.0;
 pub const FONT_TITLE: f32 = 20.0;
+pub const FONT_DISPLAY: f32 = 36.0;
 pub const FONT_HEAD: f32 = 16.0;
 #[allow(dead_code)]
 pub const FONT_LABEL: f32 = 12.0;

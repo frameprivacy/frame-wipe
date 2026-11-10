@@ -13,7 +13,7 @@ use frame_wipe::identity::{confirmation_matches, DeviceIdentity};
 use frame_wipe::method::Method;
 use frame_wipe::planner::{MediaKind, Scope, TargetSnapshot};
 use frame_wipe::progress::{Phase, Progress};
-use frame_wipe::report::{Outcome, Report};
+use frame_wipe::report::{format_elapsed_ms, Outcome, Report};
 use frame_wipe::safety::SafetyFlags;
 use frame_wipe::units::{format_bytes, format_eta, format_throughput};
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
-use theme::{FONT_BODY, FONT_HEAD, FONT_SMALL, FONT_TITLE, GRID};
+use theme::{FONT_BODY, FONT_DISPLAY, FONT_HEAD, FONT_SMALL, FONT_TITLE, GRID};
 
 fn main() -> eframe::Result<()> {
     let args = Args::parse();
@@ -188,6 +188,7 @@ enum Screen {
     Countdown,
     Work,
     Report,
+    Error,
 }
 
 struct App {
@@ -378,9 +379,10 @@ impl App {
         };
         self.selected = Some(opts[next]);
         self.error = None;
-        if matches!(self.screen, Screen::Report) {
+        if matches!(self.screen, Screen::Report | Screen::Error) {
             self.screen = Screen::Main;
             self.report = None;
+            self.error = None;
         }
     }
 
@@ -406,7 +408,7 @@ impl App {
         };
         let name = dev.snapshot.identity.display_name.clone();
         if !confirmation_matches(&name, &self.confirm) {
-            self.error = Some(format!("Type {name} to confirm."));
+            self.error = Some(self.t("ui.confirm_mismatch").replace("{name}", &name));
             return;
         }
         if self.demo {
@@ -514,7 +516,7 @@ impl App {
                         }
                         Err(e) => {
                             self.error = Some(e);
-                            self.screen = Screen::Main;
+                            self.screen = Screen::Error;
                             self.progress = None;
                         }
                     }
@@ -670,15 +672,24 @@ impl App {
             ui.add_space(GRID);
             if let Some(err) = &self.list_error {
                 theme::card_frame().show(ui, |ui| {
-                    ui.label(RichText::new(self.t("ui.failed")).color(theme::CRITICAL));
-                    ui.label(RichText::new(err).color(theme::STEEL_200).size(FONT_BODY));
+                    ui.label(
+                        RichText::new(self.t("ui.failed"))
+                            .font(FontId::new(FONT_BODY, theme::semibold()))
+                            .color(theme::CRITICAL),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(err).color(theme::STEEL_400).size(FONT_SMALL),
+                        )
+                        .wrap(),
+                    );
                 });
                 return;
             }
             if self.devices.is_empty() {
                 theme::card_frame().show(ui, |ui| {
                     ui.label(
-                        RichText::new(self.t("ui.empty"))
+                        RichText::new(self.t("ui.empty_title"))
                             .color(theme::STEEL_200)
                             .size(FONT_BODY),
                     );
@@ -742,9 +753,16 @@ impl App {
             let inner_w = ui.available_width();
             ui.set_min_width(inner_w);
             ui.set_width(inner_w);
-            if blocked.is_some() {
-                ui.set_opacity(0.48);
-            }
+            let title_color = if blocked.is_some() {
+                theme::STEEL_200
+            } else {
+                theme::TEXT
+            };
+            let size_color = if blocked.is_some() {
+                theme::STEEL_400
+            } else {
+                theme::STEEL_50
+            };
             // Title and size on one reserved row so right-to-left layout cannot
             // stretch the frame or push the tag row outside the border.
             let title_h = 20.0;
@@ -755,49 +773,42 @@ impl App {
                 Align2::LEFT_CENTER,
                 &model,
                 FontId::new(FONT_BODY, theme::semibold()),
-                theme::TEXT,
+                title_color,
             );
             ui.painter().text(
                 Pos2::new(title_rect.right(), title_rect.center().y),
                 Align2::RIGHT_CENTER,
                 &size,
                 FontId::new(FONT_BODY, theme::medium()),
-                theme::STEEL_50,
+                size_color,
             );
             ui.add_space(2.0);
             ui.label(
-                RichText::new(format!("{name}  ·  {serial}  ·  {kind}"))
+                RichText::new(format!("{name}  ·  {serial}"))
                     .font(FontId::new(FONT_SMALL, font_family_prop()))
                     .color(theme::STEEL_400),
             );
             ui.add_space(6.0);
-            // Reserved tag row: the frame min_rect always includes this height,
-            // so the border encloses the pills even when they wrap.
-            let tag_h = 22.0;
-            ui.allocate_ui_with_layout(
-                Vec2::new(inner_w, tag_h),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.set_min_size(Vec2::new(inner_w, tag_h));
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    pill(ui, kind, theme::STEEL_400, theme::SURFACE_RAISED);
-                    if snap.is_system {
-                        pill(ui, self.t("ui.system"), theme::CRITICAL, theme::CRITICAL_BG);
-                    }
-                    if snap.is_app_disk {
-                        pill(ui, self.t("ui.app_disk"), theme::WARNING, theme::WARNING_BG);
-                    }
-                    if !snap.mounts.is_empty() {
-                        pill(ui, self.t("ui.mounted"), theme::WARNING, theme::WARNING_BG);
-                    }
-                    if snap.in_use && snap.mounts.is_empty() {
-                        pill(ui, self.t("ui.in_use"), theme::WARNING, theme::WARNING_BG);
-                    }
-                    if snap.is_raid_member || snap.is_lvm_member {
-                        pill(ui, self.t("ui.raid"), theme::WARNING, theme::WARNING_BG);
-                    }
-                },
-            );
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().item_spacing.y = 6.0;
+                pill(ui, kind, theme::STEEL_200, theme::SURFACE_RAISED);
+                if snap.is_system {
+                    pill(ui, self.t("ui.system"), theme::CRITICAL, theme::CRITICAL_BG);
+                }
+                if snap.is_app_disk {
+                    pill(ui, self.t("ui.app_disk"), theme::WARNING, theme::WARNING_BG);
+                }
+                if !snap.mounts.is_empty() {
+                    pill(ui, self.t("ui.mounted"), theme::WARNING, theme::WARNING_BG);
+                }
+                if snap.in_use && snap.mounts.is_empty() {
+                    pill(ui, self.t("ui.in_use"), theme::WARNING, theme::WARNING_BG);
+                }
+                if snap.is_raid_member || snap.is_lvm_member {
+                    pill(ui, self.t("ui.raid"), theme::WARNING, theme::WARNING_BG);
+                }
+            });
         });
         let resp = inner.response.interact(sense);
         if blocked.is_some() && resp.hovered() {
@@ -809,9 +820,10 @@ impl App {
         } else if resp.clicked() && !self.running {
             self.selected = Some(index);
             self.error = None;
-            if matches!(self.screen, Screen::Report) {
+            if matches!(self.screen, Screen::Report | Screen::Error) {
                 self.screen = Screen::Main;
                 self.report = None;
+                self.error = None;
             }
         }
     }
@@ -821,6 +833,7 @@ impl App {
         match self.screen {
             Screen::Work => self.progress_view(ui, h),
             Screen::Report => self.report_view(ui, h),
+            Screen::Error => self.error_view(ui, h),
             _ => {
                 if self.selected_snap().is_some() {
                     self.detail_selected(ui, h);
@@ -837,17 +850,63 @@ impl App {
             ui.set_min_size(Vec2::new(w, h));
             ui.set_max_size(Vec2::new(w, h));
             ui.set_width(w);
+            let total = self.devices.len();
+            let open = self.selectable_indices().len();
+            let protected = total.saturating_sub(open);
+            if let Some(err) = &self.list_error {
+                ui.label(
+                    RichText::new(self.t("ui.error_list"))
+                        .font(FontId::new(FONT_TITLE, theme::semibold()))
+                        .color(theme::CRITICAL),
+                );
+                ui.add_space(GRID);
+                fill_card(ui, w, 0.0, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(err).color(theme::STEEL_200).size(FONT_BODY),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.add_space(GRID * 2.0);
+                fill_card(ui, w, 0.0, |ui| self.tips_list(ui));
+                return;
+            }
+            if total == 0 {
+                ui.label(
+                    RichText::new(self.t("ui.empty_title"))
+                        .font(FontId::new(FONT_TITLE, theme::semibold()))
+                        .color(theme::TEXT),
+                );
+                ui.add_space(GRID);
+                fill_card(ui, w, 0.0, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(self.t("ui.empty"))
+                                .color(theme::STEEL_200)
+                                .size(FONT_BODY),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.add_space(GRID * 2.0);
+                fill_card(ui, w, 0.0, |ui| self.tips_list(ui));
+                return;
+            }
             ui.label(
                 RichText::new(self.t("ui.drives_summary"))
                     .font(FontId::new(FONT_TITLE, theme::semibold()))
                     .color(theme::TEXT),
             );
-            let total = self.devices.len();
-            let open = self.selectable_indices().len();
-            let protected = total.saturating_sub(open);
             if open > 0 {
                 ui.label(
                     RichText::new(self.t("ui.select_hint"))
+                        .color(theme::STEEL_400)
+                        .size(FONT_BODY),
+                );
+            } else {
+                ui.label(
+                    RichText::new(self.t("ui.none_available"))
                         .color(theme::STEEL_400)
                         .size(FONT_BODY),
                 );
@@ -871,21 +930,6 @@ impl App {
                 ],
             );
             ui.add_space(GRID * 2.0);
-            if total == 0 && self.list_error.is_none() {
-                ui.label(
-                    RichText::new(self.t("ui.empty"))
-                        .color(theme::STEEL_200)
-                        .size(FONT_BODY),
-                );
-                ui.add_space(GRID);
-            } else if open == 0 && total > 0 {
-                ui.label(
-                    RichText::new(self.t("ui.none_available"))
-                        .color(theme::STEEL_200)
-                        .size(FONT_BODY),
-                );
-                ui.add_space(GRID);
-            }
 
             let two_col = w >= 720.0 && protected > 0;
             if two_col {
@@ -984,7 +1028,8 @@ impl App {
         let mounted = !snap.mounts.is_empty();
         let blocked = protection(&snap).is_some();
         let w = ui.available_width();
-        let footer_h = GRID * 8.0;
+        let modal_open = matches!(self.screen, Screen::Confirm | Screen::Countdown);
+        let footer_h = if modal_open { 0.0 } else { GRID * 8.0 };
         let body_h = (h - footer_h).max(120.0);
         let two_col = w >= 560.0;
 
@@ -1019,21 +1064,19 @@ impl App {
                     );
                     ui.add_space(GRID);
                 }
-                let size_txt = format!(
-                    "{} ({} bytes)",
-                    format_bytes(snap.identity.size),
-                    snap.identity.size
-                );
+                let size_txt = format_bytes(snap.identity.size);
+                let size_bytes = format!("{} bytes", snap.identity.size);
                 let path_txt = snap.identity.path.display().to_string();
-                let mut facts: Vec<(&str, &str)> = vec![
-                    (t_serial, serial.as_str()),
-                    (t_path, path_txt.as_str()),
-                    (t_size, size_txt.as_str()),
-                    (t_type, snap.kind.label()),
+                let type_txt = snap.kind.label().to_string();
+                let mut facts: Vec<(&str, &str, Option<&str>)> = vec![
+                    (t_serial, serial.as_str(), None),
+                    (t_path, path_txt.as_str(), None),
+                    (t_size, size_txt.as_str(), Some(size_bytes.as_str())),
+                    (t_type, type_txt.as_str(), None),
                 ];
                 let mounts_txt = snap.mounts.join(", ");
                 if mounted {
-                    facts.push((t_mounted, mounts_txt.as_str()));
+                    facts.push((t_mounted, mounts_txt.as_str(), None));
                 }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -1111,20 +1154,137 @@ impl App {
                         }
                     });
             });
+            if !modal_open {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(w, footer_h),
+                    Layout::bottom_up(Align::Min),
+                    |ui| {
+                        ui.set_width(w);
+                        let enabled = !blocked
+                            && !self.running
+                            && !(mounted && self.scope == ScopeKind::Whole);
+                        let btn = danger_button_width(ui, t_over, enabled, w);
+                        if btn.clicked() {
+                            self.try_open_confirm();
+                        }
+                        if let Some(err) = &self.error {
+                            ui.add_space(GRID);
+                            ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
+                        }
+                        ui.add_space(GRID);
+                        let r = ui.max_rect();
+                        ui.painter().hline(
+                            r.x_range(),
+                            r.top() + 0.5,
+                            Stroke::new(1.0_f32, theme::BORDER),
+                        );
+                    },
+                );
+            }
+        });
+    }
+
+    fn progress_view(&mut self, ui: &mut Ui, h: f32) {
+        let t_cancel = self.t("ui.cancel");
+        let title = self
+            .selected_snap()
+            .map(|s| display_model(s, self.lang))
+            .unwrap_or_else(|| self.t("ui.working").to_string());
+        let subtitle = self
+            .selected_snap()
+            .map(|s| s.identity.display_name.clone())
+            .unwrap_or_default();
+        let phase_label = self
+            .progress
+            .as_ref()
+            .map(|p| self.t(phase_key(p.phase)))
+            .unwrap_or_else(|| self.t("ui.working"));
+        let w = ui.available_width();
+        let footer_h = GRID * 8.0;
+        ui.allocate_ui(Vec2::new(w, h), |ui| {
+            ui.set_min_size(Vec2::new(w, h));
+            ui.set_max_size(Vec2::new(w, h));
+            ui.set_width(w);
+            ui.label(
+                RichText::new(&title)
+                    .font(FontId::new(FONT_TITLE, theme::semibold()))
+                    .color(theme::TEXT),
+            );
+            let meta = if subtitle.is_empty() {
+                phase_label.to_string()
+            } else {
+                format!("{phase_label}  ·  {subtitle}")
+            };
+            ui.label(RichText::new(meta).color(theme::STEEL_200).size(FONT_BODY));
+            ui.add_space(GRID * 2.0);
+            if let Some(p) = &self.progress {
+                let frac = p.fraction() as f32;
+                let show_verify =
+                    self.verify || matches!(p.phase, Phase::Verifying | Phase::Syncing);
+                stage_rail(ui, p, show_verify, self.lang);
+                ui.add_space(GRID * 2.0);
+                ui.label(
+                    RichText::new(format!("{:.0}%", (frac * 100.0).clamp(0.0, 100.0)))
+                        .font(FontId::new(FONT_DISPLAY, theme::semibold()))
+                        .color(theme::TEXT),
+                );
+                ui.add_space(GRID);
+                wide_card(ui, |ui| {
+                    let bar_w = ui.available_width();
+                    let (bar_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(bar_w, 10.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(bar_rect, CornerRadius::same(5), theme::STEEL_700);
+                    let mut fill_rect = bar_rect;
+                    let fill_w = bar_rect.width() * frac.clamp(0.0, 1.0);
+                    fill_rect.set_width(fill_w);
+                    if fill_w > 0.5 {
+                        ui.painter().rect_filled(
+                            fill_rect,
+                            CornerRadius::same(5),
+                            theme::STEEL_200,
+                        );
+                    }
+                    ui.add_space(GRID);
+                    let total = if p.bytes_total == 0 {
+                        format_bytes(p.bytes_done)
+                    } else {
+                        format!(
+                            "{} of {}",
+                            format_bytes(p.bytes_done),
+                            format_bytes(p.bytes_total)
+                        )
+                    };
+                    ui.label(RichText::new(total).size(FONT_BODY).color(theme::STEEL_200));
+                });
+                ui.add_space(GRID * 2.0);
+                let written = if p.bytes_total == 0 {
+                    format_bytes(p.bytes_done)
+                } else {
+                    format!(
+                        "{} / {}",
+                        format_bytes(p.bytes_done),
+                        format_bytes(p.bytes_total)
+                    )
+                };
+                let eta = p.eta_secs.map(format_eta).unwrap_or_else(|| "--".into());
+                let pass = format!("{}/{}", p.pass, p.passes);
+                let chips = [
+                    (self.t("ui.written"), written),
+                    (self.t("ui.throughput"), format_throughput(p.throughput_bps)),
+                    (self.t("ui.eta"), eta),
+                    (self.t("ui.pass"), pass),
+                ];
+                metric_row(ui, w, &chips);
+            }
+            ui.add_space((ui.available_height() - footer_h).max(GRID));
             ui.allocate_ui_with_layout(
                 Vec2::new(w, footer_h),
                 Layout::bottom_up(Align::Min),
                 |ui| {
                     ui.set_width(w);
-                    let enabled =
-                        !blocked && !self.running && !(mounted && self.scope == ScopeKind::Whole);
-                    let btn = danger_button_width(ui, t_over, enabled, w);
-                    if btn.clicked() {
-                        self.try_open_confirm();
-                    }
-                    if let Some(err) = &self.error {
-                        ui.add_space(GRID);
-                        ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_BODY));
+                    if text_btn(ui, t_cancel).clicked() {
+                        self.cancel.store(true, Ordering::SeqCst);
                     }
                     ui.add_space(GRID);
                     let r = ui.max_rect();
@@ -1138,167 +1298,266 @@ impl App {
         });
     }
 
-    fn progress_view(&mut self, ui: &mut Ui, h: f32) {
-        let t_cancel = self.t("ui.cancel");
-        let title = self
-            .selected_snap()
-            .map(|s| display_model(s, self.lang))
-            .unwrap_or_else(|| self.t("ui.working").to_string());
-        let w = ui.available_width();
-        let footer_h = GRID * 8.0;
-        ui.allocate_ui(Vec2::new(w, h), |ui| {
-            ui.set_min_size(Vec2::new(w, h));
-            ui.set_max_size(Vec2::new(w, h));
-            ui.label(RichText::new(&title).font(FontId::new(FONT_TITLE, theme::semibold())));
-            ui.label(
-                RichText::new(self.t("ui.working"))
-                    .color(theme::STEEL_200)
-                    .size(FONT_BODY),
-            );
-            ui.add_space(GRID * 2.0);
-            if let Some(p) = &self.progress {
-                let frac = p.fraction() as f32;
-                wide_card(ui, |ui| {
-                    let bar_w = ui.available_width();
-                    let (bar_rect, _) =
-                        ui.allocate_exact_size(Vec2::new(bar_w, 14.0), Sense::hover());
-                    ui.painter()
-                        .rect_filled(bar_rect, CornerRadius::same(7), theme::STEEL_700);
-                    let mut fill_rect = bar_rect;
-                    let fill_w = bar_rect.width() * frac.clamp(0.0, 1.0);
-                    fill_rect.set_width(fill_w);
-                    if fill_w > 0.5 {
-                        ui.painter().rect_filled(
-                            fill_rect,
-                            CornerRadius::same(7),
-                            theme::STEEL_400,
-                        );
-                    }
-                    ui.add_space(GRID);
-                    ui.label(
-                        RichText::new(format!(
-                            "{:.0}%  ·  {} of {}  ·  pass {}/{}",
-                            frac * 100.0,
-                            format_bytes(p.bytes_done),
-                            format_bytes(p.bytes_total),
-                            p.pass,
-                            p.passes
-                        ))
-                        .size(FONT_BODY)
-                        .color(theme::TEXT),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "{}  ·  eta {}",
-                            format_throughput(p.throughput_bps),
-                            p.eta_secs.map(format_eta).unwrap_or_else(|| "--".into())
-                        ))
-                        .color(theme::STEEL_200)
-                        .size(FONT_BODY),
-                    );
-                });
-            }
-            ui.add_space((ui.available_height() - footer_h).max(GRID));
-            if text_btn(ui, t_cancel).clicked() {
-                self.cancel.store(true, Ordering::SeqCst);
-            }
-        });
-    }
-
     fn report_view(&mut self, ui: &mut Ui, h: f32) {
         let t_back = self.t("ui.back");
         let Some(r) = self.report.clone() else { return };
         let w = ui.available_width();
         let footer_h = GRID * 8.0;
+        let failed = r.outcome == Outcome::Failed;
+        let title = match r.outcome {
+            Outcome::Success | Outcome::DryRun => self.t("ui.report_title"),
+            Outcome::Cancelled => self.t("ui.cancel"),
+            Outcome::Failed => self.t("ui.failed"),
+        };
+        let title_color = if failed { theme::CRITICAL } else { theme::TEXT };
         ui.allocate_ui(Vec2::new(w, h), |ui| {
             ui.set_min_size(Vec2::new(w, h));
             ui.set_max_size(Vec2::new(w, h));
-            let title = match r.outcome {
-                Outcome::Success | Outcome::DryRun => self.t("ui.report_title"),
-                Outcome::Cancelled => self.t("ui.cancel"),
-                Outcome::Failed => self.t("ui.failed"),
-            };
+            ui.set_width(w);
             ui.label(
                 RichText::new(title)
                     .font(FontId::new(FONT_TITLE, theme::semibold()))
-                    .color(if r.outcome == Outcome::Failed {
-                        theme::CRITICAL
-                    } else {
-                        theme::TEXT
-                    }),
+                    .color(title_color),
             );
-            ui.add_space(GRID);
-            let card_h = (ui.available_height() - footer_h).max(120.0);
-            let inner_h = (card_h - 28.0).max(80.0);
-            ui.allocate_ui(Vec2::new(w, card_h), |ui| {
-                theme::card_frame().show(ui, |ui| {
-                    ui.set_min_width((w - 26.0).max(0.0));
-                    ui.set_min_height(inner_h);
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .min_scrolled_height(inner_h)
-                        .max_height(inner_h)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new(r.to_text())
-                                    .font(FontId::new(FONT_BODY, egui::FontFamily::Monospace))
-                                    .color(theme::STEEL_200),
+            ui.label(
+                RichText::new(format!("{}  ·  {}", r.display_name, r.target_path))
+                    .color(theme::STEEL_200)
+                    .size(FONT_BODY),
+            );
+            ui.add_space(GRID * 2.0);
+            let elapsed = r
+                .elapsed_ms
+                .map(format_elapsed_ms)
+                .unwrap_or_else(|| "--".into());
+            let written = format_bytes(r.bytes_written);
+            let verified = if r.verified {
+                self.t("ui.verified")
+            } else {
+                self.t("ui.not_verified")
+            };
+            let chips = [
+                (self.t("ui.elapsed"), elapsed),
+                (self.t("ui.written"), written),
+                (self.t("ui.scope"), r.scope.clone()),
+                (self.t("ui.method"), r.method.clone()),
+                (self.t("ui.verify"), verified.to_string()),
+            ];
+            metric_row(ui, w, &chips);
+            ui.add_space(GRID * 2.0);
+            if !r.notes.is_empty() {
+                let bg = if failed {
+                    theme::CRITICAL_BG
+                } else {
+                    theme::SURFACE
+                };
+                egui::Frame::new()
+                    .fill(bg)
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if failed { theme::DANGER } else { theme::BORDER },
+                    ))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width((w - 26.0).max(0.0));
+                        ui.label(
+                            RichText::new(self.t("ui.notes"))
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(if failed {
+                                    theme::CRITICAL
+                                } else {
+                                    theme::STEEL_400
+                                }),
+                        );
+                        for n in &r.notes {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(n).color(theme::TEXT).size(FONT_BODY),
+                                )
+                                .wrap(),
                             );
-                        });
-                });
-            });
-            ui.add_space((ui.available_height() - GRID * 5.0).max(GRID));
-            if text_btn(ui, t_back).clicked() {
-                self.screen = Screen::Main;
-                self.report = None;
-                self.progress = None;
+                        }
+                    });
+                ui.add_space(GRID);
             }
+            if !r.warnings.is_empty() {
+                egui::Frame::new()
+                    .fill(theme::WARNING_BG)
+                    .stroke(Stroke::new(1.0_f32, theme::WARNING))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width((w - 26.0).max(0.0));
+                        ui.label(
+                            RichText::new(self.t("ui.warnings"))
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(theme::WARNING),
+                        );
+                        for n in &r.warnings {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(n).color(theme::STEEL_200).size(FONT_BODY),
+                                )
+                                .wrap(),
+                            );
+                        }
+                    });
+                ui.add_space(GRID);
+            }
+            ui.add_space((ui.available_height() - footer_h).max(GRID));
+            ui.allocate_ui_with_layout(
+                Vec2::new(w, footer_h),
+                Layout::bottom_up(Align::Min),
+                |ui| {
+                    ui.set_width(w);
+                    if text_btn(ui, t_back).clicked() {
+                        self.screen = Screen::Main;
+                        self.report = None;
+                        self.progress = None;
+                    }
+                    ui.add_space(GRID);
+                    let rct = ui.max_rect();
+                    ui.painter().hline(
+                        rct.x_range(),
+                        rct.top() + 0.5,
+                        Stroke::new(1.0_f32, theme::BORDER),
+                    );
+                },
+            );
+        });
+    }
+
+    fn error_view(&mut self, ui: &mut Ui, h: f32) {
+        let t_back = self.t("ui.back");
+        let w = ui.available_width();
+        let footer_h = GRID * 8.0;
+        let msg = self.error.clone().unwrap_or_default();
+        ui.allocate_ui(Vec2::new(w, h), |ui| {
+            ui.set_min_size(Vec2::new(w, h));
+            ui.set_max_size(Vec2::new(w, h));
+            ui.set_width(w);
+            ui.label(
+                RichText::new(self.t("ui.failed"))
+                    .font(FontId::new(FONT_TITLE, theme::semibold()))
+                    .color(theme::CRITICAL),
+            );
+            ui.label(
+                RichText::new(self.t("ui.wipe_error"))
+                    .color(theme::STEEL_200)
+                    .size(FONT_BODY),
+            );
+            ui.add_space(GRID * 2.0);
+            fill_card(ui, w, 0.0, |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(msg).color(theme::TEXT).size(FONT_BODY)).wrap(),
+                );
+            });
+            ui.add_space((ui.available_height() - footer_h).max(GRID));
+            ui.allocate_ui_with_layout(
+                Vec2::new(w, footer_h),
+                Layout::bottom_up(Align::Min),
+                |ui| {
+                    ui.set_width(w);
+                    if text_btn(ui, t_back).clicked() {
+                        self.screen = Screen::Main;
+                        self.error = None;
+                        self.progress = None;
+                    }
+                    ui.add_space(GRID);
+                    let r = ui.max_rect();
+                    ui.painter().hline(
+                        r.x_range(),
+                        r.top() + 0.5,
+                        Stroke::new(1.0_f32, theme::BORDER),
+                    );
+                },
+            );
         });
     }
 
     fn confirm_modal(&mut self, ctx: &egui::Context) {
-        let name = self
-            .selected_snap()
+        let snap = self.selected_snap().cloned();
+        let name = snap
+            .as_ref()
             .map(|s| s.identity.display_name.clone())
             .unwrap_or_default();
-        let title = self.t("ui.confirm_title");
+        let model = snap
+            .as_ref()
+            .map(|s| display_model(s, self.lang))
+            .unwrap_or_default();
+        let size = snap
+            .as_ref()
+            .map(|s| format_bytes(s.identity.size))
+            .unwrap_or_default();
+        let path = snap
+            .as_ref()
+            .map(|s| s.identity.path.display().to_string())
+            .unwrap_or_default();
+        let title = self.t("ui.confirm_overwrite");
         let hint = self.t("ui.confirm_hint");
         let t_cancel = self.t("ui.cancel");
         let t_over = self.t("ui.overwrite");
         dim_background(ctx);
+        let frame = egui::Frame::new()
+            .fill(theme::SURFACE_RAISED)
+            .stroke(Stroke::new(1.0_f32, theme::DANGER))
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(egui::Margin::same(16));
         egui::Window::new("confirm")
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([440.0, 260.0])
-            .frame(theme::raised_frame())
+            .default_width(520.0)
+            .min_width(440.0)
+            .max_width(560.0)
+            .frame(frame)
             .show(ctx, |ui| {
+                ui.set_width(ui.available_width());
                 ui.label(
                     RichText::new(title)
                         .font(FontId::new(FONT_HEAD, theme::semibold()))
                         .color(theme::CRITICAL),
                 );
                 ui.add_space(GRID);
-                ui.label(RichText::new(hint).color(theme::STEEL_200).size(FONT_BODY));
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{model}  ·  {name}  ·  {size}"))
+                            .color(theme::TEXT)
+                            .size(FONT_BODY),
+                    )
+                    .wrap(),
+                );
+                ui.label(
+                    RichText::new(&path)
+                        .color(theme::STEEL_400)
+                        .size(FONT_SMALL),
+                );
+                ui.add_space(GRID);
+                ui.add(
+                    egui::Label::new(RichText::new(hint).color(theme::STEEL_200).size(FONT_BODY))
+                        .wrap(),
+                );
                 ui.add_space(GRID);
                 ui.label(
                     RichText::new(format!("{}: {name}", self.t("ui.confirm_name")))
-                        .color(theme::TEXT)
-                        .size(FONT_BODY),
+                        .color(theme::STEEL_200)
+                        .size(FONT_SMALL),
                 );
-                ui.add_space(GRID);
-                let hint = self.t("ui.confirm_name");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.confirm)
-                        .hint_text(hint)
+                        .hint_text(name.as_str())
                         .desired_width(ui.available_width())
                         .font(FontId::new(FONT_BODY, theme::medium())),
                 );
                 if let Some(err) = &self.error {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(err).color(theme::CRITICAL).size(FONT_SMALL));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(err).color(theme::CRITICAL).size(FONT_SMALL),
+                        )
+                        .wrap(),
+                    );
                 }
                 ui.add_space(GRID * 2.0);
                 ui.horizontal(|ui| {
@@ -1319,7 +1578,15 @@ impl App {
 
     fn countdown_modal(&mut self, ctx: &egui::Context) {
         let remaining = self.countdown.unwrap_or(5);
-        let t_cd = self.t("ui.countdown");
+        let name = self
+            .selected_snap()
+            .map(|s| s.identity.display_name.clone())
+            .unwrap_or_default();
+        let model = self
+            .selected_snap()
+            .map(|s| display_model(s, self.lang))
+            .unwrap_or_default();
+        let heading = self.t("ui.countdown_of").replace("{name}", &name);
         let t_cancel = self.t("ui.cancel");
         dim_background(ctx);
         egui::Window::new("countdown")
@@ -1327,11 +1594,27 @@ impl App {
             .resizable(false)
             .collapsible(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([360.0, 180.0])
+            .default_width(420.0)
+            .min_width(360.0)
             .frame(theme::raised_frame())
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(t_cd).color(theme::STEEL_200).size(FONT_BODY));
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&heading)
+                                .color(theme::STEEL_200)
+                                .size(FONT_BODY),
+                        )
+                        .wrap(),
+                    );
+                    if !model.is_empty() {
+                        ui.label(
+                            RichText::new(&model)
+                                .font(FontId::new(FONT_BODY, theme::medium()))
+                                .color(theme::TEXT),
+                        );
+                    }
                     ui.add_space(GRID);
                     ui.label(
                         RichText::new(format!("{remaining}"))
@@ -1353,7 +1636,9 @@ impl App {
 }
 
 /// Label/value pairs as one compact row (or a 2-column grid when narrow).
-fn fact_strip(ui: &mut Ui, facts: &[(&str, &str)], wide: bool) {
+/// The optional third item is a secondary line (for example raw byte size)
+/// so the primary value does not wrap mid-number.
+fn fact_strip(ui: &mut Ui, facts: &[(&str, &str, Option<&str>)], wide: bool) {
     let per_row = if wide { facts.len().min(4).max(1) } else { 2 };
     let gap = GRID * 2.0;
     let total_w = ui.available_width();
@@ -1361,7 +1646,7 @@ fn fact_strip(ui: &mut Ui, facts: &[(&str, &str)], wide: bool) {
     for chunk in facts.chunks(per_row) {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            for (k, v) in chunk {
+            for (k, v, sub) in chunk {
                 ui.allocate_ui(Vec2::new(cell_w, 0.0), |ui| {
                     ui.set_width(cell_w);
                     ui.vertical(|ui| {
@@ -1375,6 +1660,14 @@ fn fact_strip(ui: &mut Ui, facts: &[(&str, &str)], wide: bool) {
                             egui::Label::new(RichText::new(*v).color(theme::TEXT).size(FONT_BODY))
                                 .wrap(),
                         );
+                        if let Some(sub) = sub {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(*sub).color(theme::STEEL_400).size(FONT_SMALL),
+                                )
+                                .wrap(),
+                            );
+                        }
                     });
                 });
             }
@@ -1435,9 +1728,10 @@ fn handle_keys(app: &mut App, ctx: &egui::Context) {
             Screen::Countdown | Screen::Work => {
                 app.cancel.store(true, Ordering::SeqCst);
             }
-            Screen::Report => {
+            Screen::Report | Screen::Error => {
                 app.screen = Screen::Main;
                 app.report = None;
+                app.error = None;
             }
             Screen::Main => {}
         }
@@ -1502,6 +1796,122 @@ fn rough_estimate(size: u64, method: MethodKind, verify: bool) -> String {
     let bps = 500.0 * 1024.0 * 1024.0;
     let secs = ((size as f64 * passes) / bps).ceil() as u64;
     format_eta(secs.max(1))
+}
+
+fn phase_key(phase: Phase) -> &'static str {
+    match phase {
+        Phase::Planning => "ui.phase.planning",
+        Phase::Countdown => "ui.phase.countdown",
+        Phase::Rechecking => "ui.phase.rechecking",
+        Phase::Writing => "ui.phase.writing",
+        Phase::Verifying => "ui.phase.verifying",
+        Phase::Syncing => "ui.phase.syncing",
+        Phase::Sanitizing => "ui.phase.sanitizing",
+        Phase::Cancelling => "ui.phase.cancelling",
+        Phase::Done => "ui.phase.done",
+        Phase::Failed => "ui.phase.failed",
+    }
+}
+
+fn stage_rail(ui: &mut Ui, p: &Progress, show_verify: bool, lang: Lang) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GRID;
+        let writing = matches!(
+            p.phase,
+            Phase::Writing | Phase::Planning | Phase::Rechecking
+        );
+        let verifying = matches!(p.phase, Phase::Verifying | Phase::Syncing);
+        let write_label = if p.passes > 1 {
+            format!(
+                "{} {}/{}",
+                i18n::t(lang, "ui.stage.write"),
+                p.pass,
+                p.passes
+            )
+        } else {
+            i18n::t(lang, "ui.stage.write").to_string()
+        };
+        stage_chip(ui, &write_label, writing, !verifying && !writing);
+        if show_verify {
+            let verify_label = i18n::t(lang, "ui.stage.verify");
+            stage_chip(ui, verify_label, verifying, !verifying);
+        }
+    });
+}
+
+fn stage_chip(ui: &mut Ui, label: &str, active: bool, upcoming: bool) {
+    let (fg, bg, stroke) = if active {
+        (theme::TEXT, theme::STEEL_700, theme::STEEL_400)
+    } else if upcoming {
+        (theme::STEEL_400, theme::SURFACE, theme::BORDER)
+    } else {
+        (theme::STEEL_200, theme::SURFACE_RAISED, theme::BORDER)
+    };
+    egui::Frame::new()
+        .fill(bg)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(label)
+                    .font(FontId::new(FONT_SMALL, theme::medium()))
+                    .color(fg),
+            );
+        });
+}
+
+fn metric_row(ui: &mut Ui, w: f32, items: &[(&str, String)]) {
+    let n = items.len().max(1) as f32;
+    let gap = GRID;
+    // Wrap into two rows when the panel is narrow so labels stay readable.
+    let per_row = if w >= 640.0 {
+        items.len().max(1)
+    } else {
+        ((items.len() + 1) / 2).max(1)
+    };
+    let per_row = per_row.min(items.len().max(1));
+    for chunk in items.chunks(per_row) {
+        let cols = chunk.len().max(1) as f32;
+        let chip_w = ((w - gap * (cols - 1.0)) / cols).floor().max(80.0);
+        let chip_h = GRID * 8.0;
+        ui.allocate_ui_with_layout(
+            Vec2::new(w, chip_h),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.set_height(chip_h);
+                for (lab, val) in chunk {
+                    let (rect, _) =
+                        ui.allocate_exact_size(Vec2::new(chip_w, chip_h), Sense::hover());
+                    ui.painter().rect(
+                        rect,
+                        CornerRadius::same(8),
+                        theme::SURFACE,
+                        Stroke::new(1.0_f32, theme::BORDER),
+                        StrokeKind::Inside,
+                    );
+                    let pad = 12.0;
+                    ui.painter().text(
+                        Pos2::new(rect.left() + pad, rect.top() + 8.0),
+                        Align2::LEFT_TOP,
+                        *lab,
+                        FontId::new(FONT_SMALL, theme::medium()),
+                        theme::STEEL_400,
+                    );
+                    ui.painter().text(
+                        Pos2::new(rect.left() + pad, rect.top() + 26.0),
+                        Align2::LEFT_TOP,
+                        val,
+                        FontId::new(FONT_BODY, theme::semibold()),
+                        theme::TEXT,
+                    );
+                }
+            },
+        );
+        ui.add_space(GRID);
+    }
+    let _ = n;
 }
 
 fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) {
@@ -1588,13 +1998,25 @@ fn danger_button_width(ui: &mut Ui, label: &str, enabled: bool, w: f32) -> egui:
                 egui::Button::new(
                     RichText::new(label)
                         .font(FontId::new(FONT_BODY, theme::semibold()))
-                        .color(if enabled { theme::BG } else { theme::STEEL_400 }),
+                        .color(if enabled {
+                            theme::TEXT
+                        } else {
+                            theme::STEEL_400
+                        }),
                 )
                 .fill(if enabled {
-                    theme::CRITICAL
+                    theme::DANGER
                 } else {
                     theme::SURFACE_RAISED
                 })
+                .stroke(Stroke::new(
+                    1.0_f32,
+                    if enabled {
+                        theme::DANGER_HOVER
+                    } else {
+                        theme::BORDER
+                    },
+                ))
                 .corner_radius(CornerRadius::same(8))
                 .min_size(Vec2::new(w, h)),
             )
@@ -1685,7 +2107,7 @@ fn dim_background(ctx: &egui::Context) {
         .show(ctx, |ui| {
             let r = ui.allocate_rect(rect, Sense::click());
             ui.painter()
-                .rect_filled(rect, 0.0, Color32::from_black_alpha(180));
+                .rect_filled(rect, 0.0, Color32::from_black_alpha(210));
             let _ = r;
         });
 }
@@ -1803,7 +2225,7 @@ fn demo_report(ok: bool, id: DeviceIdentity) -> Report {
         serial: id.serial,
         size: id.size,
         method: "zeros (verify)".into(),
-        scope: "wholedevice".into(),
+        scope: "whole device".into(),
         bytes_written: if ok { id.size } else { id.size / 3 },
         verified: ok,
         outcome: if ok {
