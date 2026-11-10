@@ -568,7 +568,7 @@ fn install_windows_cancel() {
 #[cfg(windows)]
 unsafe extern "system" fn on_console_ctrl(ctrl_type: u32) -> i32 {
     // CTRL_C_EVENT = 0, CTRL_BREAK_EVENT = 1, CTRL_CLOSE_EVENT = 2.
-    if matches!(ctrl_type, 0 | 1 | 2) {
+    if matches!(ctrl_type, 0..=2) {
         if let Some(f) = CANCEL_SLOT.get() {
             f.store(true, std::sync::atomic::Ordering::SeqCst);
         }
