@@ -281,7 +281,7 @@ fn diskutil_info(path: &Path) -> Result<DiskutilInfo, Error> {
 
 fn plist_string(dict: &plist::Dictionary, keys: &[&str]) -> Option<String> {
     for key in keys {
-        if let Some(s) = dict.get(*key).and_then(|v| v.as_string()) {
+        if let Some(s) = dict.get(key).and_then(|v| v.as_string()) {
             if !s.is_empty() {
                 return Some(s.to_string());
             }
@@ -292,7 +292,7 @@ fn plist_string(dict: &plist::Dictionary, keys: &[&str]) -> Option<String> {
 
 fn plist_u64(dict: &plist::Dictionary, keys: &[&str]) -> Option<u64> {
     for key in keys {
-        if let Some(u) = dict.get(*key).and_then(plist_value_u64) {
+        if let Some(u) = dict.get(key).and_then(plist_value_u64) {
             return Some(u);
         }
     }
@@ -301,7 +301,7 @@ fn plist_u64(dict: &plist::Dictionary, keys: &[&str]) -> Option<u64> {
 
 fn plist_bool(dict: &plist::Dictionary, keys: &[&str]) -> Option<bool> {
     for key in keys {
-        if let Some(v) = dict.get(*key) {
+        if let Some(v) = dict.get(key) {
             if let Some(b) = v.as_boolean() {
                 return Some(b);
             }
