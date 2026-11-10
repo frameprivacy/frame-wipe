@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/frame-wipe",
+    "crates/frame-wipe-cli",
+    "crates/frame-wipe-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.85"
+authors = ["Frame Labs Inc. <frameprivacy@proton.me>"]
+repository = "https://github.com/frameprivacy/frame-wipe"
+homepage = "https://github.com/frameprivacy/frame-wipe"
+description = "Fast, lean, open-source storage wiping for macOS, Linux and Windows."
+
+[workspace.dependencies]
+frame-wipe = { path = "crates/frame-wipe" }
+clap = { version = "4.5", features = ["derive"] }
+libc = "0.2"
+rand = { version = "0.8", features = ["std"] }
+rand_chacha = "0.3"
+getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
+plist = "1"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Vhd",
+    "Win32_System_Ioctl",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_WindowsProgramming",
+    "Win32_Storage_InstallableFileSystems",
+] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3
+
+[profile.release-safe]
+inherits = "release"
+panic = "unwind"

@@ -1,0 +1,41 @@
+[package]
+name = "frame-wipe-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Desktop interface for framewipe."
+default-run = "framewipe-gui"
+
+[[bin]]
+name = "framewipe-gui"
+path = "src/main.rs"
+
+[dependencies]
+frame-wipe = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11"] }
+egui = "0.31"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.31"
+
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+needless_return = "allow"
+needless_borrow = "allow"
+collapsible_if = "allow"
+manual_clamp = "allow"
+should_implement_trait = "allow"
+len_without_is_empty = "allow"
+bool_comparison = "allow"
+lines_filter_map_ok = "allow"
+format_in_format_args = "allow"
+map_identity = "allow"

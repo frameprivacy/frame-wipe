@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: framewipe-linux-x64
+          - os: ubuntu-24.04-arm
+            artifact: framewipe-linux-arm64
+          - os: windows-latest
+            artifact: framewipe-windows-x64
+          - os: windows-11-arm
+            artifact: framewipe-windows-arm64
+          - os: macos-13
+            artifact: framewipe-macos-x64
+          - os: macos-latest
+            artifact: framewipe-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev pkg-config
+      - run: cargo build --release -p frame-wipe-cli -p frame-wipe-gui
+      - name: Pack
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ -f target/release/framewipe.exe ]; then
+            cp target/release/framewipe.exe dist/
+            cp target/release/framewipe-gui.exe dist/
+          else
+            cp target/release/framewipe dist/
+            cp target/release/framewipe-gui dist/
+          fi
+          cp README.md LICENSE SAFETY.md SECURITY.md dist/
+          echo "Code signing is not done in this release. Treat the binaries as unsigned. (TODO: sign.)" > dist/SIGNING.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/**
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            Unsigned prerelease builds of framewipe and framewipe-gui.
+            Code signing is a TODO.
+            See SAFETY.md before using this on a real disk.
+          files: artifacts/**/*

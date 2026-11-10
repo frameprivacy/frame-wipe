@@ -1,0 +1,43 @@
+[package]
+name = "frame-wipe-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line interface for framewipe."
+default-run = "framewipe"
+
+[[bin]]
+name = "framewipe"
+path = "src/main.rs"
+
+[lib]
+name = "framewipe_cli"
+path = "src/lib.rs"
+
+[dependencies]
+frame-wipe = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"
+
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+needless_return = "allow"
+needless_borrow = "allow"
+collapsible_if = "allow"
+manual_clamp = "allow"
+should_implement_trait = "allow"
+len_without_is_empty = "allow"
+bool_comparison = "allow"
+lines_filter_map_ok = "allow"
+format_in_format_args = "allow"
+map_identity = "allow"

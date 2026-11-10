@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  FRAME_WIPE_FORBID_REAL_DISKS: "1"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - windows-latest
+          - windows-11-arm
+          - macos-13
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Linux window-system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxss-dev pkg-config mesa-utils xvfb
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace -- --test-threads=1
+      - name: Release binaries
+        run: |
+          cargo build --release -p frame-wipe-cli
+          cargo build --release -p frame-wipe-gui
+      - name: Binary sizes
+        shell: bash
+        run: |
+          echo "os=${{ matrix.os }}"
+          ls -lh target/release/framewipe target/release/framewipe-gui target/release/framewipe.exe target/release/framewipe-gui.exe 2>/dev/null || true
+      - name: Integration (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/ci-integration.sh
+      - name: Integration (Windows)
+        if: runner.os == 'Windows'
+        run: pwsh -File scripts/ci-integration.ps1
+      - name: GUI smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1024x768x24" ./target/release/framewipe-gui --smoke-test
+      - name: GUI smoke (macOS / Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          bin="./target/release/framewipe-gui"
+          if [ -f "./target/release/framewipe-gui.exe" ]; then bin="./target/release/framewipe-gui.exe"; fi
+          "$bin" --smoke-test
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: framewipe-${{ matrix.os }}
+          path: |
+            target/release/framewipe
+            target/release/framewipe-gui
+            target/release/framewipe.exe
+            target/release/framewipe-gui.exe
+          if-no-files-found: ignore
+
+  bench:
+    name: bench vs dd (Linux)
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p frame-wipe-cli
+      - run: bash scripts/bench-vs-dd.sh
+        env:
+          FRAME_WIPE_FORBID_REAL_DISKS: "1"

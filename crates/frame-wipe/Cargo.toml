@@ -1,0 +1,45 @@
+[package]
+name = "frame-wipe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core library for Frame Wipe: safe, fast storage overwriting."
+
+[dependencies]
+libc = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+getrandom = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
+
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+needless_return = "allow"
+needless_borrow = "allow"
+collapsible_if = "allow"
+manual_clamp = "allow"
+should_implement_trait = "allow"
+len_without_is_empty = "allow"
+bool_comparison = "allow"
+lines_filter_map_ok = "allow"
+format_in_format_args = "allow"
+map_identity = "allow"
