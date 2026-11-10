@@ -38,20 +38,27 @@ jobs:
       - name: Pack
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p pack dist
           if [ -f target/release/framewipe.exe ]; then
-            cp target/release/framewipe.exe dist/
-            cp target/release/framewipe-gui.exe dist/
+            cp target/release/framewipe.exe pack/
+            cp target/release/framewipe-gui.exe pack/
           else
-            cp target/release/framewipe dist/
-            cp target/release/framewipe-gui dist/
+            cp target/release/framewipe pack/
+            cp target/release/framewipe-gui pack/
           fi
-          cp README.md LICENSE SAFETY.md SECURITY.md dist/
-          echo "Code signing is not done in this release. Treat the binaries as unsigned. (TODO: sign.)" > dist/SIGNING.txt
+          cp README.md LICENSE SAFETY.md SECURITY.md pack/
+          echo "Code signing is not done in this release. Treat the binaries as unsigned. (TODO: sign.)" > pack/SIGNING.txt
+          artifact="${{ matrix.artifact }}"
+          if [ -f pack/framewipe.exe ]; then
+            python3 -c "import shutil, sys; shutil.make_archive('dist/' + sys.argv[1], 'zip', 'pack')" "$artifact"
+          else
+            tar -C pack -czf "dist/${artifact}.tar.gz" .
+          fi
+          ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/**
+          path: dist/*
 
   publish:
     needs: build
@@ -70,4 +77,5 @@ jobs:
             Unsigned prerelease builds of framewipe and framewipe-gui.
             Code signing is a TODO.
             See SAFETY.md before using this on a real disk.
+            macOS builds are Apple Silicon only.
           files: artifacts/**/*
