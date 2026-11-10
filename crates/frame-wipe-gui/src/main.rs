@@ -842,15 +842,17 @@ impl App {
                     .font(FontId::new(FONT_TITLE, theme::semibold()))
                     .color(theme::TEXT),
             );
-            ui.label(
-                RichText::new(self.t("ui.select_hint"))
-                    .color(theme::STEEL_400)
-                    .size(FONT_BODY),
-            );
-            ui.add_space(GRID);
             let total = self.devices.len();
             let open = self.selectable_indices().len();
             let protected = total.saturating_sub(open);
+            if open > 0 {
+                ui.label(
+                    RichText::new(self.t("ui.select_hint"))
+                        .color(theme::STEEL_400)
+                        .size(FONT_BODY),
+                );
+            }
+            ui.add_space(GRID);
             stat_row(
                 ui,
                 w,
@@ -886,7 +888,7 @@ impl App {
             }
 
             let rest = ui.available_height().max(120.0);
-            let two_col = w >= 520.0 && protected > 0;
+            let two_col = w >= 720.0 && protected > 0;
             if two_col {
                 let gap = GRID * 2.0;
                 let col_w = ((w - gap) / 2.0).floor();
@@ -953,15 +955,19 @@ impl App {
         ui.label(RichText::new(self.t("ui.tips")).font(FontId::new(FONT_BODY, theme::semibold())));
         ui.add_space(GRID);
         for key in ["ui.tip1", "ui.tip2", "ui.tip3"] {
-            ui.horizontal(|ui| {
+            // A plain horizontal label does not wrap and gets clipped in the card.
+            ui.horizontal_top(|ui| {
                 ui.label(RichText::new("·").color(theme::STEEL_400));
-                ui.label(
-                    RichText::new(self.t(key))
-                        .color(theme::STEEL_200)
-                        .size(FONT_BODY),
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(self.t(key))
+                            .color(theme::STEEL_200)
+                            .size(FONT_BODY),
+                    )
+                    .wrap(),
                 );
             });
-            ui.add_space(4.0);
+            ui.add_space(6.0);
         }
     }
 
