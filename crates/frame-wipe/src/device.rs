@@ -197,8 +197,8 @@ fn inspect_directory(path: &Path) -> Result<TargetSnapshot, Error> {
             media: "directory".into(),
         },
         kind: MediaKind::Unknown,
-        is_system: false,
-        is_app_disk: false,
+        is_system: path_is_on_system_disk(path),
+        is_app_disk: path_is_on_app_disk(path),
         mounts: vec![path.display().to_string()],
         in_use: false,
         is_raid_member: false,
@@ -232,6 +232,49 @@ fn file_id_of(path: &Path, meta: &std::fs::Metadata) -> Option<(u64, u64)> {
     {
         let _ = (path, meta);
         None
+    }
+}
+
+/// True when `path` lives on the boot or system disk (the volume that holds
+/// `/`, `/boot`, or the Windows directory).
+pub fn path_is_on_system_disk(path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return linux::path_is_on_system_disk(path);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos::path_is_on_system_disk(path);
+    }
+    #[cfg(windows)]
+    {
+        return windows::path_is_on_system_disk(path);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// True when `path` lives on the disk that holds the running executable.
+pub fn path_is_on_app_disk(path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return linux::path_is_on_app_disk(path);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos::path_is_on_app_disk(path);
+    }
+    #[cfg(windows)]
+    {
+        return windows::path_is_on_app_disk(path);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = path;
+        false
     }
 }
 

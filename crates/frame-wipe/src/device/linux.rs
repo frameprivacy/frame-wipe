@@ -251,6 +251,24 @@ fn parent_disk(name: &str) -> Option<String> {
     None
 }
 
+pub fn path_is_on_system_disk(path: &Path) -> bool {
+    let system = system_disk_names();
+    if system.is_empty() {
+        return false;
+    }
+    disks_for_path_inner(path)
+        .iter()
+        .any(|n| system.contains(n))
+}
+
+pub fn path_is_on_app_disk(path: &Path) -> bool {
+    let app = disks_for_path_inner(&std::env::current_exe().unwrap_or_default());
+    if app.is_empty() {
+        return false;
+    }
+    disks_for_path_inner(path).iter().any(|n| app.contains(n))
+}
+
 fn system_disk_names() -> Vec<String> {
     let mut names = Vec::new();
     for p in [Path::new("/"), Path::new("/boot"), Path::new("/boot/efi")] {

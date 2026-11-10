@@ -290,6 +290,9 @@ mod tests {
             assume_yes: true,
             typed_confirm: Some(name),
             countdown_secs: 1,
+            // Temp dirs often live on the system volume; this test is about
+            // cleanup on cancel, not the system-disk guard.
+            allow_system_disk: true,
             ..SafetyFlags::default()
         };
         let cancel = Arc::new(AtomicBool::new(false));

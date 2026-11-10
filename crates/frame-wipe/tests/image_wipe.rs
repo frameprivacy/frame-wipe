@@ -276,3 +276,50 @@ fn restricted_mode_refuses_windows_physical_drive_before_open() {
         "must refuse before opening a raw device, got {err}"
     );
 }
+
+#[test]
+fn system_volume_directory_is_flagged_and_free_space_is_refused() {
+    use frame_wipe::planner::plan;
+
+    let _env = lock_env();
+    std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+    let root = system_root_dir();
+    let snap = device::inspect(root).expect("inspect system root");
+    assert!(
+        snap.is_directory,
+        "the system root should inspect as a directory, got {snap:?}"
+    );
+    assert!(
+        snap.is_system,
+        "the directory that holds the OS must be flagged as the system volume so free-space mode requires --allow-system-disk"
+    );
+    // confirmation_matches currently rejects a display name of "/", so the
+    // planner is exercised with a confirmable copy of the same snapshot.
+    let mut plan_snap = snap.clone();
+    if !frame_wipe::identity::confirmation_matches(
+        &plan_snap.identity.display_name,
+        &plan_snap.identity.display_name,
+    ) {
+        plan_snap.identity.display_name = "system-root".into();
+    }
+    let flags = SafetyFlags {
+        explicit_target: true,
+        assume_yes: true,
+        typed_confirm: Some(plan_snap.identity.display_name.clone()),
+        countdown_secs: 0,
+        ..SafetyFlags::default()
+    };
+    let err = plan(&plan_snap, Scope::FreeSpace, Method::zeros(), None, &flags).unwrap_err();
+    assert_eq!(err.guard(), Some(Guard::SystemDisk), "got {err}");
+}
+
+fn system_root_dir() -> &'static Path {
+    #[cfg(windows)]
+    {
+        Path::new(r"C:\")
+    }
+    #[cfg(not(windows))]
+    {
+        Path::new("/")
+    }
+}

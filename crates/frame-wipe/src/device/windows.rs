@@ -97,6 +97,57 @@ pub fn disks_for_path(path: &Path) -> Vec<String> {
         .collect()
 }
 
+pub fn path_is_on_system_disk(path: &Path) -> bool {
+    let system = system_disk_numbers();
+    let nums = disk_numbers_for_path(path);
+    if !system.is_empty() && nums.iter().any(|n| system.contains(n)) {
+        return true;
+    }
+    // If IOCTL extents are unavailable, fall back to the Windows drive letter.
+    same_drive_letter(path, windows_directory().as_deref())
+}
+
+pub fn path_is_on_app_disk(path: &Path) -> bool {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let app = disk_numbers_for_path(&exe);
+    let nums = disk_numbers_for_path(path);
+    if !app.is_empty() && nums.iter().any(|n| app.contains(n)) {
+        return true;
+    }
+    same_drive_letter(path, Some(&exe))
+}
+
+fn windows_directory() -> Option<PathBuf> {
+    let mut buf = [0u16; 512];
+    let n = unsafe { GetWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) };
+    if n == 0 {
+        return None;
+    }
+    Some(PathBuf::from(utf16_to_string(&buf)))
+}
+
+fn same_drive_letter(path: &Path, other: Option<&Path>) -> bool {
+    let Some(other) = other else {
+        return false;
+    };
+    match (drive_letter(path), drive_letter(other)) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(&b),
+        _ => false,
+    }
+}
+
+fn drive_letter(path: &Path) -> Option<String> {
+    let s = path.to_string_lossy();
+    let rest = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    let rest = rest.strip_prefix(r"\\.\").unwrap_or(rest);
+    let b = rest.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        Some(rest[..2].to_string())
+    } else {
+        None
+    }
+}
+
 fn physical_num(name: &str) -> Option<u32> {
     parse_physical(name)
 }

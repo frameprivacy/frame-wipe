@@ -62,6 +62,22 @@ pub fn disks_for_path(path: &Path) -> Vec<String> {
     Vec::new()
 }
 
+pub fn path_is_on_system_disk(path: &Path) -> bool {
+    let system = disks_for_path(Path::new("/"));
+    if system.is_empty() {
+        return false;
+    }
+    disks_for_path(path).iter().any(|n| system.contains(n))
+}
+
+pub fn path_is_on_app_disk(path: &Path) -> bool {
+    let app = disks_for_path(&std::env::current_exe().unwrap_or_default());
+    if app.is_empty() {
+        return false;
+    }
+    disks_for_path(path).iter().any(|n| app.contains(n))
+}
+
 fn disk_id(path: &Path) -> String {
     let s = path.to_string_lossy();
     let s = s
