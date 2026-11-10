@@ -3,7 +3,7 @@
 use crate::device::{DeviceInfo, EnumerateOptions};
 use crate::error::Error;
 use crate::identity::DeviceIdentity;
-use crate::planner::{MediaKind, TargetSnapshot};
+use crate::planner::TargetSnapshot;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
