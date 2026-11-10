@@ -175,7 +175,6 @@ pub fn hostname() -> String {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::System::WindowsProgramming::GetComputerNameW;
         let mut buf = [0u16; 256];
         let mut len = buf.len() as u32;
@@ -183,7 +182,6 @@ pub fn hostname() -> String {
         if ok != 0 {
             return String::from_utf16_lossy(&buf[..len as usize]);
         }
-        let _ = OsStringExt::from_wide;
     }
     "unknown".into()
 }
