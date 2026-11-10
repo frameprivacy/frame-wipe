@@ -670,18 +670,12 @@ impl App {
                 );
             });
             ui.add_space(GRID);
-            if let Some(err) = &self.list_error {
+            if self.list_error.is_some() {
                 theme::card_frame().show(ui, |ui| {
                     ui.label(
                         RichText::new(self.t("ui.failed"))
                             .font(FontId::new(FONT_BODY, theme::semibold()))
                             .color(theme::CRITICAL),
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(err).color(theme::STEEL_400).size(FONT_SMALL),
-                        )
-                        .wrap(),
                     );
                 });
                 return;
@@ -1283,7 +1277,7 @@ impl App {
                 Layout::bottom_up(Align::Min),
                 |ui| {
                     ui.set_width(w);
-                    if text_btn(ui, t_cancel).clicked() {
+                    if footer_btn(ui, t_cancel).clicked() {
                         self.cancel.store(true, Ordering::SeqCst);
                     }
                     ui.add_space(GRID);
@@ -1340,7 +1334,7 @@ impl App {
                 (self.t("ui.written"), written),
                 (self.t("ui.scope"), r.scope.clone()),
                 (self.t("ui.method"), r.method.clone()),
-                (self.t("ui.verify"), verified.to_string()),
+                (self.t("ui.stage.verify"), verified.to_string()),
             ];
             metric_row(ui, w, &chips);
             ui.add_space(GRID * 2.0);
@@ -1410,7 +1404,7 @@ impl App {
                 Layout::bottom_up(Align::Min),
                 |ui| {
                     ui.set_width(w);
-                    if text_btn(ui, t_back).clicked() {
+                    if footer_btn(ui, t_back).clicked() {
                         self.screen = Screen::Main;
                         self.report = None;
                         self.progress = None;
@@ -1458,7 +1452,7 @@ impl App {
                 Layout::bottom_up(Align::Min),
                 |ui| {
                     ui.set_width(w);
-                    if text_btn(ui, t_back).clicked() {
+                    if footer_btn(ui, t_back).clicked() {
                         self.screen = Screen::Main;
                         self.error = None;
                         self.progress = None;
@@ -1544,9 +1538,10 @@ impl App {
                         .color(theme::STEEL_200)
                         .size(FONT_SMALL),
                 );
+                let name_hint = self.t("ui.confirm_name");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.confirm)
-                        .hint_text(name.as_str())
+                        .hint_text(name_hint)
                         .desired_width(ui.available_width())
                         .font(FontId::new(FONT_BODY, theme::medium())),
                 );
@@ -1975,6 +1970,16 @@ fn text_btn(ui: &mut Ui, label: &str) -> egui::Response {
             .stroke(Stroke::new(1.0_f32, theme::BORDER))
             .corner_radius(CornerRadius::same(8))
             .min_size(Vec2::new(0.0, GRID * 4.0)),
+    )
+}
+
+fn footer_btn(ui: &mut Ui, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(RichText::new(label).color(theme::STEEL_50).size(FONT_BODY))
+            .fill(theme::SURFACE_RAISED)
+            .stroke(Stroke::new(1.0_f32, theme::BORDER))
+            .corner_radius(CornerRadius::same(8))
+            .min_size(Vec2::new(GRID * 20.0, GRID * 4.5)),
     )
 }
 
