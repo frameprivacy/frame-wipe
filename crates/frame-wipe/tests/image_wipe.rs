@@ -278,6 +278,122 @@ fn restricted_mode_refuses_windows_physical_drive_before_open() {
 }
 
 #[test]
+fn resume_without_flag_refuses_and_with_flag_skips_already_written_bytes() {
+    use frame_wipe::journal;
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let (_env, tmp, dir) = setup();
+    let path = make_image(&dir, "resume.img", 4 * 1024 * 1024, 0xA5);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = cancel.clone();
+    let path_w = path.clone();
+    let flags = flags_for(&path);
+    let handle = thread::spawn(move || {
+        let req = WipeRequest {
+            path: path_w,
+            scope: Scope::WholeDevice,
+            method: Method::Single {
+                pattern: frame_wipe::method::Pattern::Zeros,
+                verify: false,
+            },
+            chunk_size: Some(64 * 1024),
+            flags,
+        };
+        wipe(&req, &cancel_w, |p| {
+            if p.phase == frame_wipe::progress::Phase::Writing && p.bytes_done >= 512 * 1024 {
+                cancel_w.store(true, Ordering::SeqCst);
+            }
+        })
+    });
+    let started = Instant::now();
+    let result = loop {
+        if handle.is_finished() {
+            break handle.join().expect("wipe thread panicked");
+        }
+        if started.elapsed() > Duration::from_secs(30) {
+            cancel.store(true, Ordering::SeqCst);
+            let result = handle.join().expect("wipe thread panicked");
+            panic!("wipe did not cancel in time: {result:?}");
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    let report = result.expect("cancelled wipe should return a report");
+    assert_eq!(report.outcome, Outcome::Cancelled);
+
+    let journal_path = journal::journal_path_for(&path);
+    let journal = journal::read(&journal_path)
+        .unwrap()
+        .expect("incomplete wipe must leave a journal");
+    let resume_at = journal.offset;
+    assert!(
+        resume_at > 0 && resume_at < 4 * 1024 * 1024,
+        "journal offset should be mid-wipe, got {resume_at}"
+    );
+
+    // Mark the already-written prefix so a restart from offset 0 would overwrite the marker.
+    {
+        let mut f = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.write_all(&vec![0x11u8; resume_at as usize]).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    let mut flags = flags_for(&path);
+    let err = wipe(
+        &WipeRequest {
+            path: path.clone(),
+            scope: Scope::WholeDevice,
+            method: Method::Single {
+                pattern: frame_wipe::method::Pattern::Zeros,
+                verify: false,
+            },
+            chunk_size: Some(64 * 1024),
+            flags: flags.clone(),
+        },
+        &Arc::new(AtomicBool::new(false)),
+        |_| {},
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, frame_wipe::Error::Journal(_)),
+        "a second start without --resume must refuse, got {err}"
+    );
+
+    flags.resume = true;
+    let report = wipe(
+        &WipeRequest {
+            path: path.clone(),
+            scope: Scope::WholeDevice,
+            method: Method::Single {
+                pattern: frame_wipe::method::Pattern::Zeros,
+                verify: false,
+            },
+            chunk_size: Some(64 * 1024),
+            flags,
+        },
+        &Arc::new(AtomicBool::new(false)),
+        |_| {},
+    )
+    .expect("resume");
+    assert_eq!(report.outcome, Outcome::Success);
+    let data = fs::read(&path).unwrap();
+    assert!(
+        data[..resume_at as usize].iter().all(|b| *b == 0x11),
+        "resume must not rewrite bytes before the journal offset"
+    );
+    assert!(
+        data[resume_at as usize..].iter().all(|b| *b == 0),
+        "resume must finish zeroing from the journal offset"
+    );
+    assert!(
+        !journal_path.exists(),
+        "completed resume should remove the journal"
+    );
+    drop(tmp);
+}
+
+#[test]
 fn system_volume_directory_is_flagged_and_free_space_is_refused() {
     use frame_wipe::planner::plan;
 

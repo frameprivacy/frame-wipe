@@ -22,6 +22,10 @@ pub struct Journal {
     pub size: u64,
     pub phase: String,
     pub complete: bool,
+    /// CSPRNG seed for a random pass, so --resume can rewrite and verify
+    /// the same stream. Hex is avoided; serde stores this as a byte array.
+    #[serde(default)]
+    pub random_seed: Option<[u8; 32]>,
 }
 
 impl Journal {
@@ -43,6 +47,7 @@ impl Journal {
             size,
             phase: "starting".into(),
             complete: false,
+            random_seed: None,
         }
     }
 }

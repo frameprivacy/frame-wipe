@@ -203,7 +203,8 @@ pub fn wipe(
     }
 
     let journal_path = journal::journal_path_for(&req.path);
-    if let Some(existing) = journal::load_for_resume(&journal_path, &planned.identity)? {
+    let existing_journal = journal::load_for_resume(&journal_path, &planned.identity)?;
+    if let Some(existing) = existing_journal.as_ref() {
         if !req.flags.resume {
             return Err(Error::Journal(format!(
                 "an incomplete wipe journal exists at {} (offset {} of {}, started {}). Pass --resume if you want to continue, or delete the journal if that run is finished.",
@@ -213,17 +214,43 @@ pub fn wipe(
                 existing.started_utc
             )));
         }
+        let expected_method = planned.method.label();
+        if existing.method != expected_method {
+            return Err(Error::Journal(format!(
+                "existing journal method '{}' does not match '{}' for this run; refusing to resume. Delete {} only if you know the previous run is finished.",
+                existing.method,
+                expected_method,
+                journal_path.display()
+            )));
+        }
+        if existing.size != planned.size {
+            return Err(Error::Journal(format!(
+                "existing journal size {} does not match current size {}",
+                existing.size, planned.size
+            )));
+        }
+        if existing.pass == 0 || existing.pass > planned.passes.len() as u32 {
+            return Err(Error::Journal(format!(
+                "existing journal pass {} is out of range for a {}-pass method",
+                existing.pass,
+                planned.passes.len()
+            )));
+        }
     }
 
-    let mut journal = Journal::new(
-        &planned.identity,
-        &planned.method.label(),
-        planned.passes.len() as u32,
-        planned.size,
-        &started
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| started.to_string()),
-    );
+    let mut journal = if let Some(existing) = existing_journal.clone() {
+        existing
+    } else {
+        Journal::new(
+            &planned.identity,
+            &planned.method.label(),
+            planned.passes.len() as u32,
+            planned.size,
+            &started
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| started.to_string()),
+        )
+    };
     journal::checkpoint(&journal_path, &journal)?;
 
     let mut bad: Vec<SectorError> = Vec::new();
@@ -231,41 +258,79 @@ pub fn wipe(
     let mut outcome = Outcome::Success;
     let passes = planned.passes.clone();
     let total_passes = passes.len() as u32;
+    let resume_state = existing_journal;
 
     'passes: for (idx, pass) in passes.iter().enumerate() {
         let pass_no = (idx as u32) + 1;
+        if let Some(ref prev) = resume_state {
+            if pass_no < prev.pass {
+                continue;
+            }
+        }
+
+        let resume_this_pass = resume_state
+            .as_ref()
+            .is_some_and(|prev| prev.pass == pass_no);
+        let write_already_done = resume_this_pass
+            && resume_state.as_ref().is_some_and(|prev| {
+                prev.phase == "verifying"
+                    || prev.phase == "verify_failed"
+                    || prev.offset >= planned.size
+            });
+        let start_offset = if resume_this_pass && !write_already_done {
+            crate::units::align_down(
+                resume_state.as_ref().map(|prev| prev.offset).unwrap_or(0),
+                planned.chunk_size.max(1),
+            )
+        } else {
+            0
+        };
+
         journal.pass = pass_no;
-        journal.phase = "writing".into();
-        journal.offset = 0;
+        if !write_already_done {
+            journal.phase = "writing".into();
+            journal.offset = start_offset;
+        }
+        let pass_seed = if resume_this_pass {
+            resume_state
+                .as_ref()
+                .and_then(|prev| prev.random_seed)
+                .or_else(|| seed_for_pass(pass.pattern, pass_no))
+        } else {
+            seed_for_pass(pass.pattern, pass_no)
+        };
+        journal.random_seed = pass_seed;
         journal::checkpoint(&journal_path, &journal)?;
 
-        let pass_seed = seed_for_pass(pass.pattern, pass_no);
-        match write_pass(
-            &mut io,
-            &planned,
-            *pass,
-            pass_no,
-            total_passes,
-            pass_seed,
-            cancel,
-            &mut on_progress,
-            &journal_path,
-            &mut journal,
-            &mut bad,
-        ) {
-            Ok(n) => bytes_written = bytes_written.saturating_add(n),
-            Err(Error::Cancelled) => {
-                outcome = Outcome::Cancelled;
-                let _ = io.sync();
-                journal.phase = "cancelled".into();
-                let _ = journal::checkpoint(&journal_path, &journal);
-                break 'passes;
-            }
-            Err(e) => {
-                journal.phase = "failed".into();
-                let _ = journal::checkpoint(&journal_path, &journal);
-                let _ = io.sync();
-                return Err(e);
+        if !write_already_done {
+            match write_pass(
+                &mut io,
+                &planned,
+                *pass,
+                pass_no,
+                total_passes,
+                pass_seed,
+                start_offset,
+                cancel,
+                &mut on_progress,
+                &journal_path,
+                &mut journal,
+                &mut bad,
+            ) {
+                Ok(n) => bytes_written = bytes_written.saturating_add(n),
+                Err(Error::Cancelled) => {
+                    outcome = Outcome::Cancelled;
+                    let _ = io.sync();
+                    journal.phase = "cancelled".into();
+                    let _ = journal::checkpoint(&journal_path, &journal);
+                    break 'passes;
+                }
+                Err(e) => {
+                    journal.phase = "failed".into();
+                    let _ = journal::checkpoint(&journal_path, &journal);
+                    let _ = io.sync();
+                    return Err(e);
+                }
             }
         }
 
@@ -368,6 +433,7 @@ fn write_pass(
     pass_no: u32,
     total_passes: u32,
     seed: Option<[u8; 32]>,
+    start_offset: u64,
     cancel: &Arc<AtomicBool>,
     on_progress: &mut impl FnMut(Progress),
     journal_path: &Path,
@@ -375,7 +441,7 @@ fn write_pass(
     bad: &mut Vec<SectorError>,
 ) -> Result<u64, Error> {
     let size = plan.size;
-    if size == 0 {
+    if size == 0 || start_offset >= size {
         return Ok(0);
     }
     let chunk = plan.chunk_size as usize;
@@ -414,7 +480,7 @@ fn write_pass(
         let _ = fill.join();
     };
 
-    let mut next_to_queue: u64 = 0;
+    let mut next_to_queue: u64 = start_offset;
     let mut in_flight: u32 = 0;
     let mut written: u64 = 0;
     let mut meter = Meter::new();
