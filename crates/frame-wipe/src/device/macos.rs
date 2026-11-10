@@ -64,10 +64,13 @@ pub fn disks_for_path(path: &Path) -> Vec<String> {
 
 pub fn path_is_on_system_disk(path: &Path) -> bool {
     let system = disks_for_path(Path::new("/"));
-    if system.is_empty() {
-        return false;
+    if !system.is_empty() && disks_for_path(path).iter().any(|n| system.contains(n)) {
+        return true;
     }
-    disks_for_path(path).iter().any(|n| system.contains(n))
+    // If diskutil is missing, fails, or its plist cannot be parsed, still
+    // protect the boot volume and the APFS data volume.
+    let roots: Vec<&Path> = ["/".as_ref(), "/System/Volumes/Data".as_ref()];
+    super::same_unix_device(path, &roots)
 }
 
 pub fn path_is_on_app_disk(path: &Path) -> bool {
@@ -244,8 +247,18 @@ struct DiskutilInfo {
     image_path: Option<String>,
 }
 
+fn diskutil_command() -> Command {
+    // Prefer the absolute path so a slim PATH (common in CI) still finds it.
+    let bin = if Path::new("/usr/sbin/diskutil").exists() {
+        "/usr/sbin/diskutil"
+    } else {
+        "diskutil"
+    };
+    Command::new(bin)
+}
+
 fn diskutil_info(path: &Path) -> Result<DiskutilInfo, Error> {
-    let out = Command::new("diskutil")
+    let out = diskutil_command()
         .args(["info", "-plist"])
         .arg(path)
         .output()
@@ -257,11 +270,94 @@ fn diskutil_info(path: &Path) -> Result<DiskutilInfo, Error> {
             out.status
         )));
     }
-    plist::from_bytes(&out.stdout).map_err(|e| Error::Message(format!("parse diskutil plist: {e}")))
+    match plist::from_bytes::<DiskutilInfo>(&out.stdout) {
+        Ok(info) => Ok(info),
+        Err(_) => {
+            let val: plist::Value = plist::from_bytes(&out.stdout)
+                .map_err(|e| Error::Message(format!("parse diskutil plist: {e}")))?;
+            Ok(diskutil_info_from_value(&val))
+        }
+    }
+}
+
+fn plist_string(dict: &plist::Dictionary, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(s) = dict.get(*key).and_then(|v| v.as_string()) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn plist_u64(dict: &plist::Dictionary, keys: &[&str]) -> Option<u64> {
+    for key in keys {
+        if let Some(u) = dict.get(*key).and_then(plist_value_u64) {
+            return Some(u);
+        }
+    }
+    None
+}
+
+fn plist_bool(dict: &plist::Dictionary, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Some(v) = dict.get(*key) {
+            if let Some(b) = v.as_boolean() {
+                return Some(b);
+            }
+            if let Some(u) = plist_value_u64(v) {
+                return Some(u != 0);
+            }
+        }
+    }
+    None
+}
+
+fn plist_value_u64(v: &plist::Value) -> Option<u64> {
+    if let Some(i) = v.as_signed_integer() {
+        return u64::try_from(i).ok();
+    }
+    if let Some(u) = v.as_unsigned_integer() {
+        return Some(u);
+    }
+    if let Some(s) = v.as_string() {
+        return s.parse().ok();
+    }
+    None
+}
+
+fn diskutil_info_from_value(val: &plist::Value) -> DiskutilInfo {
+    let Some(dict) = val.as_dictionary() else {
+        return DiskutilInfo::default();
+    };
+    DiskutilInfo {
+        device_identifier: plist_string(dict, &["DeviceIdentifier"]),
+        device_node: plist_string(dict, &["DeviceNode"]),
+        media_name: plist_string(dict, &["MediaName"]),
+        io_registry_entry_name: plist_string(dict, &["IORegistryEntryName"]),
+        volume_uuid: plist_string(dict, &["VolumeUUID"]),
+        disk_uuid: plist_string(dict, &["DiskUUID"]),
+        serial: plist_string(
+            dict,
+            &["SerialNumber", "DeviceSerialNumber", "IOSerialNumber"],
+        ),
+        size_bytes: plist_u64(dict, &["TotalSize", "Size"]),
+        solid_state: plist_bool(dict, &["SolidState"]),
+        protocol: plist_string(dict, &["Protocol"]),
+        virtual_or_physical: plist_string(dict, &["VirtualOrPhysical"]),
+        media_type: plist_string(dict, &["MediaType"]),
+        mount_point: plist_string(dict, &["MountPoint"]),
+        content: plist_string(dict, &["Content"]),
+        raid_or_csm: plist_string(dict, &["RAIDSetUUID", "CoreStorageUUID"]),
+        whole_disk: plist_string(dict, &["ParentWholeDisk", "WholeDisk"]),
+        device_block_size: plist_u64(dict, &["DeviceBlockSize"]),
+        image_path: plist_string(dict, &["ImagePath", "DiskImagePath"]),
+    }
 }
 
 fn diskutil_list() -> Result<Vec<String>, Error> {
-    let out = Command::new("diskutil")
+    let out = diskutil_command()
         .args(["list", "-plist"])
         .output()
         .map_err(|e| Error::Message(format!("diskutil list failed: {e}")))?;

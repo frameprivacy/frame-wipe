@@ -278,6 +278,18 @@ pub fn path_is_on_app_disk(path: &Path) -> bool {
     }
 }
 
+#[cfg(unix)]
+pub(crate) fn same_unix_device(path: &Path, roots: &[&Path]) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let dev = meta.dev();
+    roots
+        .iter()
+        .any(|root| std::fs::metadata(root).ok().is_some_and(|m| m.dev() == dev))
+}
+
 /// Parent disk the current executable lives on, as a platform path prefix or name.
 pub fn app_disk_names() -> Vec<String> {
     let Ok(exe) = std::env::current_exe() else {

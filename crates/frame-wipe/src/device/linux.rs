@@ -253,12 +253,19 @@ fn parent_disk(name: &str) -> Option<String> {
 
 pub fn path_is_on_system_disk(path: &Path) -> bool {
     let system = system_disk_names();
-    if system.is_empty() {
-        return false;
+    if !system.is_empty()
+        && disks_for_path_inner(path)
+            .iter()
+            .any(|n| system.contains(n))
+    {
+        return true;
     }
-    disks_for_path_inner(path)
-        .iter()
-        .any(|n| system.contains(n))
+    // If sysfs/mount lookup yields no names, still protect the OS volumes by
+    // comparing st_dev with /, /boot, and /boot/efi.
+    super::same_unix_device(
+        path,
+        &[Path::new("/"), Path::new("/boot"), Path::new("/boot/efi")],
+    )
 }
 
 pub fn path_is_on_app_disk(path: &Path) -> bool {
