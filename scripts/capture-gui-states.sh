@@ -181,6 +181,9 @@ except ImportError:
 else:
     im = Image.open(path)
     iw, ih = im.size
+    # ffmpeg writes a pHYs chunk with a 0:1 aspect that makes some viewers
+    # rescale the image; re-save without it.
+    im.convert("RGB").save(path, optimize=True)
 if (iw, ih) != (w, h):
     raise SystemExit(f"{path} is {iw}x{ih}, expected {w}x{h}")
 print(f"verified {path} {iw}x{ih}")

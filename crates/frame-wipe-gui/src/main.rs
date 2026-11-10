@@ -887,43 +887,25 @@ impl App {
                 ui.add_space(GRID);
             }
 
-            let rest = ui.available_height().max(120.0);
             let two_col = w >= 720.0 && protected > 0;
             if two_col {
                 let gap = GRID * 2.0;
                 let col_w = ((w - gap) / 2.0).floor();
-                ui.allocate_ui_with_layout(
-                    Vec2::new(w, rest),
-                    Layout::left_to_right(Align::Min),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
-                            fill_card(ui, col_w, rest, |ui| {
-                                self.protected_list(ui);
-                            });
-                        });
-                        ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
-                            fill_card(ui, col_w, rest, |ui| {
-                                self.tips_list(ui);
-                            });
-                        });
-                    },
-                );
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    ui.allocate_ui(Vec2::new(col_w, 0.0), |ui| {
+                        fill_card(ui, col_w, 0.0, |ui| self.protected_list(ui));
+                    });
+                    ui.allocate_ui(Vec2::new(col_w, 0.0), |ui| {
+                        fill_card(ui, col_w, 0.0, |ui| self.tips_list(ui));
+                    });
+                });
             } else {
                 if protected > 0 {
-                    let half = ((rest - GRID * 2.0) / 2.0).max(80.0);
-                    fill_card(ui, w, half, |ui| {
-                        self.protected_list(ui);
-                    });
+                    fill_card(ui, w, 0.0, |ui| self.protected_list(ui));
                     ui.add_space(GRID * 2.0);
-                    fill_card(ui, w, ui.available_height().max(80.0), |ui| {
-                        self.tips_list(ui);
-                    });
-                } else {
-                    fill_card(ui, w, rest, |ui| {
-                        self.tips_list(ui);
-                    });
                 }
+                fill_card(ui, w, 0.0, |ui| self.tips_list(ui));
             }
         });
     }
@@ -1037,95 +1019,97 @@ impl App {
                     );
                     ui.add_space(GRID);
                 }
-                let rest = ui.available_height().max(80.0);
-                let identity = |ui: &mut Ui| {
-                    kv(ui, t_serial, &serial);
-                    kv(ui, t_path, &snap.identity.path.display().to_string());
-                    kv(
-                        ui,
-                        t_size,
-                        &format!(
-                            "{} ({} bytes)",
-                            format_bytes(snap.identity.size),
-                            snap.identity.size
-                        ),
-                    );
-                    kv(ui, t_type, snap.kind.label());
-                    if !snap.mounts.is_empty() {
-                        kv(ui, t_mounted, &snap.mounts.join(", "));
-                    }
-                };
-                let options = |ui: &mut Ui| {
-                    ui.label(
-                        RichText::new(t_scope)
-                            .font(FontId::new(FONT_SMALL, theme::medium()))
-                            .color(theme::STEEL_400),
-                    );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
-                        scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
-                    });
-                    ui.add_space(GRID);
-                    ui.label(
-                        RichText::new(t_method)
-                            .font(FontId::new(FONT_SMALL, theme::medium()))
-                            .color(theme::STEEL_400),
-                    );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
-                        method_choice(ui, &mut self.method, MethodKind::Random, t_random);
-                        method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
-                    });
-                    ui.add_space(GRID);
-                    ui.checkbox(&mut self.verify, t_verify);
-                    ui.checkbox(&mut self.dry_run, t_dry);
-                    ui.add_space(GRID * 1.5);
-                    let est = rough_estimate(snap.identity.size, self.method, self.verify);
-                    ui.label(
-                        RichText::new(t_est)
-                            .font(FontId::new(FONT_SMALL, theme::medium()))
-                            .color(theme::STEEL_400),
-                    );
-                    ui.label(
-                        RichText::new(est)
-                            .font(FontId::new(FONT_HEAD, theme::semibold()))
-                            .color(theme::TEXT),
-                    );
-                    ui.label(
-                        RichText::new(t_est_note)
-                            .color(theme::STEEL_400)
-                            .size(FONT_SMALL),
-                    );
-                };
-                if two_col {
-                    let gap = GRID * 2.0;
-                    let col_w = ((w - gap) / 2.0).floor();
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(w, rest),
-                        Layout::left_to_right(Align::Min),
-                        |ui| {
-                            ui.spacing_mut().item_spacing.x = gap;
-                            ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
-                                fill_card(ui, col_w, rest, identity);
-                            });
-                            ui.allocate_ui(Vec2::new(col_w, rest), |ui| {
-                                fill_card(ui, col_w, rest, options);
-                            });
-                        },
-                    );
-                } else {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .max_height(rest)
-                        .show(ui, |ui| {
-                            ui.set_width(w);
-                            fill_card(ui, w, 0.0, identity);
-                            ui.add_space(GRID * 2.0);
-                            fill_card(ui, w, 0.0, options);
-                        });
+                let size_txt = format!(
+                    "{} ({} bytes)",
+                    format_bytes(snap.identity.size),
+                    snap.identity.size
+                );
+                let path_txt = snap.identity.path.display().to_string();
+                let mut facts: Vec<(&str, &str)> = vec![
+                    (t_serial, serial.as_str()),
+                    (t_path, path_txt.as_str()),
+                    (t_size, size_txt.as_str()),
+                    (t_type, snap.kind.label()),
+                ];
+                let mounts_txt = snap.mounts.join(", ");
+                if mounted {
+                    facts.push((t_mounted, mounts_txt.as_str()));
                 }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .max_height(ui.available_height())
+                    .show(ui, |ui| {
+                        ui.set_width(w);
+                        fill_card(ui, w, 0.0, |ui| fact_strip(ui, &facts, two_col));
+                        ui.add_space(GRID * 2.0);
+                        let est = rough_estimate(snap.identity.size, self.method, self.verify);
+                        let choices = |ui: &mut Ui| {
+                            ui.label(
+                                RichText::new(t_scope)
+                                    .font(FontId::new(FONT_SMALL, theme::medium()))
+                                    .color(theme::STEEL_400),
+                            );
+                            ui.horizontal(|ui| {
+                                scope_choice(ui, &mut self.scope, ScopeKind::Whole, t_whole);
+                                scope_choice(ui, &mut self.scope, ScopeKind::FreeSpace, t_free);
+                            });
+                            ui.add_space(GRID);
+                            ui.label(
+                                RichText::new(t_method)
+                                    .font(FontId::new(FONT_SMALL, theme::medium()))
+                                    .color(theme::STEEL_400),
+                            );
+                            ui.horizontal(|ui| {
+                                method_choice(ui, &mut self.method, MethodKind::Zeros, t_zeros);
+                                method_choice(ui, &mut self.method, MethodKind::Random, t_random);
+                                method_choice(ui, &mut self.method, MethodKind::Multi, t_multi);
+                            });
+                            ui.add_space(GRID);
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.verify, t_verify);
+                                ui.add_space(GRID * 2.0);
+                                ui.checkbox(&mut self.dry_run, t_dry);
+                            });
+                        };
+                        let estimate = |ui: &mut Ui| {
+                            ui.label(
+                                RichText::new(t_est)
+                                    .font(FontId::new(FONT_SMALL, theme::medium()))
+                                    .color(theme::STEEL_400),
+                            );
+                            ui.label(
+                                RichText::new(&est)
+                                    .font(FontId::new(FONT_TITLE, theme::semibold()))
+                                    .color(theme::TEXT),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(t_est_note)
+                                        .color(theme::STEEL_400)
+                                        .size(FONT_SMALL),
+                                )
+                                .wrap(),
+                            );
+                        };
+                        if two_col {
+                            let gap = GRID * 2.0;
+                            let left_w = ((w - gap) * 0.6).floor();
+                            let right_w = w - gap - left_w;
+                            ui.horizontal_top(|ui| {
+                                ui.spacing_mut().item_spacing.x = gap;
+                                ui.allocate_ui(Vec2::new(left_w, 0.0), |ui| {
+                                    fill_card(ui, left_w, 0.0, choices);
+                                });
+                                ui.allocate_ui(Vec2::new(right_w, 0.0), |ui| {
+                                    fill_card(ui, right_w, 0.0, estimate);
+                                });
+                            });
+                        } else {
+                            fill_card(ui, w, 0.0, choices);
+                            ui.add_space(GRID * 2.0);
+                            fill_card(ui, w, 0.0, estimate);
+                        }
+                    });
             });
             ui.allocate_ui_with_layout(
                 Vec2::new(w, footer_h),
@@ -1368,6 +1352,36 @@ impl App {
     }
 }
 
+/// Label/value pairs as one compact row (or a 2-column grid when narrow).
+fn fact_strip(ui: &mut Ui, facts: &[(&str, &str)], wide: bool) {
+    let per_row = if wide { facts.len().min(4).max(1) } else { 2 };
+    let gap = GRID * 2.0;
+    let total_w = ui.available_width();
+    let cell_w = ((total_w - gap * (per_row as f32 - 1.0)) / per_row as f32).floor();
+    for chunk in facts.chunks(per_row) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (k, v) in chunk {
+                ui.allocate_ui(Vec2::new(cell_w, 0.0), |ui| {
+                    ui.set_width(cell_w);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.label(
+                            RichText::new(*k)
+                                .font(FontId::new(FONT_SMALL, theme::medium()))
+                                .color(theme::STEEL_400),
+                        );
+                        ui.add(
+                            egui::Label::new(RichText::new(*v).color(theme::TEXT).size(FONT_BODY))
+                                .wrap(),
+                        );
+                    });
+                });
+            }
+        });
+    }
+}
+
 fn wide_card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     let w = ui.available_width();
     fill_card(ui, w, 0.0, add);
@@ -1488,20 +1502,6 @@ fn rough_estimate(size: u64, method: MethodKind, verify: bool) -> String {
     let bps = 500.0 * 1024.0 * 1024.0;
     let secs = ((size as f64 * passes) / bps).ceil() as u64;
     format_eta(secs.max(1))
-}
-
-fn kv(ui: &mut Ui, k: &str, v: &str) {
-    ui.horizontal(|ui| {
-        ui.set_width(ui.available_width());
-        ui.label(
-            RichText::new(k)
-                .font(FontId::new(FONT_SMALL, theme::medium()))
-                .color(theme::STEEL_400),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(RichText::new(v).color(theme::TEXT).size(FONT_BODY));
-        });
-    });
 }
 
 fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) {
