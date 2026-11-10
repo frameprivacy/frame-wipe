@@ -84,9 +84,14 @@ pub fn path_looks_like_raw_device(path: &Path) -> bool {
         return true;
     }
     if s.starts_with("/dev/") {
-        let name = s.trim_start_matches("/dev/").trim_start_matches('r');
-        // Permit explicitly checked loop/ram/fd later; this is a first-pass filter.
-        if name.starts_with("loop") || name.starts_with("ram") || name.starts_with("fd") {
+        let name = s.trim_start_matches("/dev/");
+        // Check ram and zram before any macOS rdisk special case. A leading
+        // 'r' must not be stripped from "ram0", or it becomes "am0".
+        if name.starts_with("loop")
+            || name.starts_with("ram")
+            || name.starts_with("zram")
+            || name.starts_with("fd")
+        {
             return false;
         }
         return true;
@@ -289,7 +294,21 @@ pub fn confirmation_mismatch_error(identity: &DeviceIdentity, typed: &str) -> Er
 
 #[cfg(test)]
 mod tests {
-    use super::windows_path_looks_like_raw_device;
+    use super::{path_looks_like_raw_device, windows_path_looks_like_raw_device};
+    use std::path::Path;
+
+    #[test]
+    fn ram_and_loop_nodes_are_not_classified_as_raw_physical_disks() {
+        assert!(!path_looks_like_raw_device(Path::new("/dev/ram0")));
+        assert!(!path_looks_like_raw_device(Path::new("/dev/ram15")));
+        assert!(!path_looks_like_raw_device(Path::new("/dev/zram0")));
+        assert!(!path_looks_like_raw_device(Path::new("/dev/loop0")));
+        assert!(!path_looks_like_raw_device(Path::new("/dev/fd0")));
+        assert!(path_looks_like_raw_device(Path::new("/dev/sda")));
+        assert!(path_looks_like_raw_device(Path::new("/dev/nvme0n1")));
+        assert!(path_looks_like_raw_device(Path::new("/dev/rdisk0")));
+        assert!(path_looks_like_raw_device(Path::new(r"\\.\PhysicalDrive0")));
+    }
 
     #[test]
     fn windows_extended_temp_path_is_not_a_raw_device() {

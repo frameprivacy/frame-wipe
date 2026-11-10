@@ -62,7 +62,7 @@ pub fn inspect_device(path: &Path) -> Result<TargetSnapshot, Error> {
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let name = name.trim_start_matches('r'); // /dev/r* does not exist on Linux, harmless
+    // Do not strip a leading 'r': that would turn ram0 into am0.
     let system = system_disk_names();
     let app = disks_for_path_inner(&std::env::current_exe().unwrap_or_default());
     let mounts = read_mounts();
