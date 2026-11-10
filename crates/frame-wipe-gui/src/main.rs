@@ -41,7 +41,9 @@ fn main() -> eframe::Result<()> {
         // Prefer DirectX / WARP; glow requires OpenGL 2.0, which Windows CI lacks.
         options.renderer = eframe::Renderer::Wgpu;
     }
-    eframe::run_native(
+    let smoke = args.smoke;
+    let args_fallback = args.clone();
+    match eframe::run_native(
         "Frame Wipe",
         options,
         Box::new(move |cc| {
@@ -50,7 +52,38 @@ fn main() -> eframe::Result<()> {
             cc.egui_ctx.set_pixels_per_point(scale);
             Ok(Box::new(App::new(args)))
         }),
-    )
+    ) {
+        Ok(()) => Ok(()),
+        Err(err) if smoke => {
+            // Windows CI (and some other headless hosts) have no OpenGL or GPU
+            // adapter. Still exercise layout, fonts, and screens without a window.
+            eprintln!("native window failed: {err}");
+            eprintln!("running headless smoke instead");
+            headless_smoke(&args_fallback)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn headless_smoke(args: &Args) -> eframe::Result<()> {
+    let ctx = egui::Context::default();
+    theme::install_fonts(&ctx);
+    theme::apply(&ctx);
+    ctx.set_pixels_per_point(args.scale);
+    let mut app = App::new(args.clone());
+    app.smoke = false; // do not process::exit; return to the caller
+    let size = egui::vec2(args.width, args.height);
+    for _ in 0..3 {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let _ = ctx.run(raw, |ctx| {
+            app.tick(ctx);
+        });
+    }
+    eprintln!("headless smoke ok");
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -439,6 +472,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tick(ctx);
+    }
+}
+
+impl App {
+    fn tick(&mut self, ctx: &egui::Context) {
         ctx.set_pixels_per_point(self.scale);
         theme::apply(ctx);
         while let Ok(ev) = self.ev_rx.try_recv() {
