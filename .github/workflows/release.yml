@@ -24,8 +24,6 @@ jobs:
             artifact: framewipe-windows-x64
           - os: windows-11-arm
             artifact: framewipe-windows-arm64
-          - os: macos-13
-            artifact: framewipe-macos-x64
           - os: macos-latest
             artifact: framewipe-macos-arm64
     steps:
