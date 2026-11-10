@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::identity::DeviceIdentity;
 use crate::planner::{MediaKind, TargetSnapshot};
+use crate::safety;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
@@ -59,6 +60,26 @@ pub fn enumerate(opts: EnumerateOptions) -> Result<Vec<DeviceInfo>, Error> {
 /// Inspect a user-supplied path (device node, volume, or regular file / disk image).
 /// Never follows a symlink: a symlink is reported with `is_symlink = true`.
 pub fn inspect(path: &Path) -> Result<TargetSnapshot, Error> {
+    // Raw device paths (\\.\PhysicalDriveN, /dev/sda, …) are not always
+    // valid filesystem metadata targets. Skip straight to the platform inspector.
+    if safety::path_looks_like_raw_device(path) {
+        #[cfg(target_os = "linux")]
+        {
+            return linux::inspect_device(path);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            return macos::inspect_device(path);
+        }
+        #[cfg(windows)]
+        {
+            return windows::inspect_device(path);
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        {
+            return Err(Error::InvalidTarget(path.to_path_buf()));
+        }
+    }
     let meta = std::fs::symlink_metadata(path).map_err(|e| Error::Open {
         path: path.to_path_buf(),
         detail: e.to_string(),

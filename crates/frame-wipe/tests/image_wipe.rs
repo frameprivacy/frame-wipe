@@ -250,3 +250,29 @@ fn system_disk_is_detected_and_not_wiped() {
         );
     }
 }
+
+#[test]
+fn restricted_mode_refuses_windows_physical_drive_before_open() {
+    let _env = lock_env();
+    std::env::set_var("FRAME_WIPE_FORBID_REAL_DISKS", "1");
+    let flags = SafetyFlags {
+        explicit_target: true,
+        assume_yes: true,
+        typed_confirm: Some("PhysicalDrive0".into()),
+        countdown_secs: 0,
+        ..SafetyFlags::default()
+    };
+    let req = WipeRequest {
+        path: std::path::PathBuf::from(r"\\.\PhysicalDrive0"),
+        scope: Scope::WholeDevice,
+        method: Method::zeros(),
+        chunk_size: None,
+        flags,
+    };
+    let err = wipe(&req, &Arc::new(AtomicBool::new(false)), |_| {}).unwrap_err();
+    assert_eq!(
+        err.guard(),
+        Some(Guard::RestrictedTestTarget),
+        "must refuse before opening a raw device, got {err}"
+    );
+}

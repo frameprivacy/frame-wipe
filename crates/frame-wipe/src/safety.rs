@@ -78,8 +78,10 @@ pub fn test_dir() -> Option<PathBuf> {
 /// never a raw physical device path.
 pub fn path_looks_like_raw_device(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    if cfg!(windows) {
-        return windows_path_looks_like_raw_device(&s);
+    // Always apply the Windows check so a \\.\PhysicalDrive path is refused
+    // in restricted mode on every host, including Linux CI.
+    if windows_path_looks_like_raw_device(&s) {
+        return true;
     }
     if s.starts_with("/dev/") {
         let name = s.trim_start_matches("/dev/").trim_start_matches('r');
@@ -119,6 +121,22 @@ pub fn windows_path_looks_like_raw_device(s: &str) -> bool {
         return false;
     }
     true
+}
+
+/// Refuse raw physical device paths immediately in restricted mode, before inspect
+/// or open. Virtual loop/ram devices are not treated as raw by
+/// [`path_looks_like_raw_device`].
+pub fn assert_not_raw_device_in_restricted_mode(path: &Path) -> Result<(), Error> {
+    if real_disks_forbidden() && path_looks_like_raw_device(path) {
+        return Err(Error::refused(
+            Guard::RestrictedTestTarget,
+            format!(
+                "refusing to write to raw device {} while FRAME_WIPE_FORBID_REAL_DISKS is set",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// In restricted mode, only regular files under an allowed directory, or virtual devices

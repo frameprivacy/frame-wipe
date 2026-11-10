@@ -42,6 +42,11 @@ pub fn wipe(
 ) -> Result<Report, Error> {
     let started = OffsetDateTime::now_utc();
     let started_instant = Instant::now();
+    // Refuse raw physical paths before inspect so restricted-mode tests never
+    // open a real disk. Windows \\.\PhysicalDriveN is not a filesystem path,
+    // and symlink_metadata can fail with "Incorrect function". Virtual loop
+    // devices are not classified as raw, so their inspect still runs.
+    safety::assert_not_raw_device_in_restricted_mode(&req.path)?;
     let snap = device::inspect(&req.path)?;
     safety::assert_permitted_in_restricted_mode(
         &req.path,
