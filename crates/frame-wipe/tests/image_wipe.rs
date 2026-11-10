@@ -394,6 +394,49 @@ fn resume_without_flag_refuses_and_with_flag_skips_already_written_bytes() {
 }
 
 #[test]
+fn cancel_during_verify_returns_cancelled_outcome() {
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let (_env, tmp, dir) = setup();
+    let path = make_image(&dir, "verify-cancel.img", 4 * 1024 * 1024, 0xA5);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = cancel.clone();
+    let path_w = path.clone();
+    let flags = flags_for(&path);
+    let handle = thread::spawn(move || {
+        let req = WipeRequest {
+            path: path_w,
+            scope: Scope::WholeDevice,
+            method: Method::zeros(),
+            chunk_size: Some(64 * 1024),
+            flags,
+        };
+        wipe(&req, &cancel_w, |p| {
+            if p.phase == frame_wipe::progress::Phase::Verifying && p.bytes_done > 0 {
+                cancel_w.store(true, Ordering::SeqCst);
+            }
+        })
+    });
+    let started = Instant::now();
+    let result = loop {
+        if handle.is_finished() {
+            break handle.join().expect("wipe thread panicked");
+        }
+        if started.elapsed() > Duration::from_secs(30) {
+            cancel.store(true, Ordering::SeqCst);
+            let result = handle.join().expect("wipe thread panicked");
+            panic!("wipe did not finish in time: {result:?}");
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    let report = result.expect("cancel during verify should be a cancelled report, not an error");
+    assert_eq!(report.outcome, Outcome::Cancelled);
+    drop(tmp);
+}
+
+#[test]
 fn system_volume_directory_is_flagged_and_free_space_is_refused() {
     use frame_wipe::planner::plan;
 

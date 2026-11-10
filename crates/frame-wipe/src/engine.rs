@@ -349,6 +349,13 @@ pub fn wipe(
                 &mut on_progress,
                 &mut bad,
             ) {
+                if matches!(e, Error::Cancelled) {
+                    outcome = Outcome::Cancelled;
+                    journal.phase = "cancelled".into();
+                    let _ = journal::checkpoint(&journal_path, &journal);
+                    let _ = io.sync();
+                    break 'passes;
+                }
                 journal.phase = "verify_failed".into();
                 let _ = journal::checkpoint(&journal_path, &journal);
                 let _ = io.sync();
