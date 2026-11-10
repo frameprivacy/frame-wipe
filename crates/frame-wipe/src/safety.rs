@@ -79,8 +79,7 @@ pub fn test_dir() -> Option<PathBuf> {
 pub fn path_looks_like_raw_device(path: &Path) -> bool {
     let s = path.to_string_lossy();
     if cfg!(windows) {
-        let l = s.to_ascii_lowercase();
-        return l.contains(r"\physicaldrive") || l.starts_with(r"\\.\") || l.starts_with(r"\\?\");
+        return windows_path_looks_like_raw_device(&s);
     }
     if s.starts_with("/dev/") {
         let name = s.trim_start_matches("/dev/").trim_start_matches('r');
@@ -91,6 +90,35 @@ pub fn path_looks_like_raw_device(path: &Path) -> bool {
         return true;
     }
     false
+}
+
+/// Windows raw devices live in the DOS device namespace (`\\.\PhysicalDrive0`,
+/// `\\?\HarddiskVolume1`, …). Canonical regular-file paths often start with
+/// `\\?\C:\`, which is not a raw device.
+pub fn windows_path_looks_like_raw_device(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    if l.contains(r"\physicaldrive") {
+        return true;
+    }
+    let rest = if let Some(r) = l.strip_prefix(r"\\.\") {
+        r
+    } else if let Some(r) = l.strip_prefix(r"\\?\") {
+        r
+    } else {
+        return false;
+    };
+    let rest = rest.strip_prefix(r"?\").unwrap_or(rest);
+    if rest.len() >= 2 {
+        let b = rest.as_bytes();
+        // \\?\C:\Users\file.txt or \\.\C:\...
+        if b[0].is_ascii_alphabetic() && b[1] == b':' {
+            return false;
+        }
+    }
+    if rest.starts_with(r"unc\") {
+        return false;
+    }
+    true
 }
 
 /// In restricted mode, only regular files under an allowed directory, or virtual devices
@@ -239,4 +267,23 @@ pub fn confirmation_mismatch_error(identity: &DeviceIdentity, typed: &str) -> Er
             identity.display_name
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_path_looks_like_raw_device;
+
+    #[test]
+    fn windows_extended_temp_path_is_not_a_raw_device() {
+        assert!(!windows_path_looks_like_raw_device(
+            r"\\?\C:\Users\runneradmin\AppData\Local\Temp\.tmp6G2gNm\doc.txt"
+        ));
+        assert!(!windows_path_looks_like_raw_device(r"C:\Temp\disk.img"));
+        assert!(!windows_path_looks_like_raw_device(
+            r"\\?\UNC\server\share\file.img"
+        ));
+        assert!(windows_path_looks_like_raw_device(r"\\.\PhysicalDrive0"));
+        assert!(windows_path_looks_like_raw_device(r"\\?\PhysicalDrive1"));
+        assert!(windows_path_looks_like_raw_device(r"\\.\HarddiskVolume1"));
+    }
 }
