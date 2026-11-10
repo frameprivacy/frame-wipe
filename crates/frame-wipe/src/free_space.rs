@@ -34,6 +34,19 @@ fn file_cap() -> u64 {
     FILE_SIZE
 }
 
+/// Directory that should receive filler files.
+/// If `requested` is already a directory, it is used. If it is a block
+/// device, the first mount point from the snapshot is used instead.
+pub fn fill_root_for(requested: &Path, is_dir: bool, mounts: &[String]) -> Result<PathBuf, Error> {
+    if is_dir {
+        return Ok(requested.to_path_buf());
+    }
+    if let Some(mp) = mounts.iter().map(|s| s.trim()).find(|s| !s.is_empty()) {
+        return Ok(PathBuf::from(mp));
+    }
+    Err(Error::InvalidTarget(requested.to_path_buf()))
+}
+
 pub fn wipe_free_space(
     mount: &Path,
     method: Method,
@@ -63,11 +76,19 @@ pub fn wipe_free_space(
     if meta.file_type().is_symlink() {
         return Err(Error::Symlink(mount.to_path_buf()));
     }
-    if !meta.is_dir() {
-        return Err(Error::InvalidTarget(mount.to_path_buf()));
+    let root = fill_root_for(mount, meta.is_dir(), &snap.mounts)?;
+    let root_meta = fs::symlink_metadata(&root).map_err(|e| Error::Open {
+        path: root.clone(),
+        detail: e.to_string(),
+    })?;
+    if root_meta.file_type().is_symlink() {
+        return Err(Error::Symlink(root));
+    }
+    if !root_meta.is_dir() {
+        return Err(Error::InvalidTarget(root));
     }
 
-    let dir = mount.join(FILL_DIR);
+    let dir = root.join(FILL_DIR);
     if dir.exists() {
         if fs::symlink_metadata(&dir)?.file_type().is_symlink() {
             return Err(Error::Symlink(dir));
@@ -170,7 +191,7 @@ pub fn wipe_free_space(
         }
     }
     // Best-effort sync of the directory.
-    if let Ok(f) = File::open(mount) {
+    if let Ok(f) = File::open(&root) {
         let _ = f.sync_all();
     }
 
@@ -350,5 +371,20 @@ mod tests {
             snap.identity.is_identified(),
             "a directory needs a file id so free-space mode can be planned"
         );
+    }
+
+    #[test]
+    fn fill_root_uses_the_first_mount_when_the_target_is_a_device_node() {
+        let root = fill_root_for(
+            Path::new("/dev/sdb"),
+            false,
+            &["/mnt/usb".into(), "/mnt/usb-data".into()],
+        )
+        .expect("mount point");
+        assert_eq!(root, PathBuf::from("/mnt/usb"));
+        let err = fill_root_for(Path::new("/dev/sdb"), false, &[]).unwrap_err();
+        assert!(matches!(err, Error::InvalidTarget(_)), "got {err}");
+        let dir = Path::new("/tmp/some-mount");
+        assert_eq!(fill_root_for(dir, true, &[]).unwrap(), dir);
     }
 }
